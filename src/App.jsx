@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 
-const SAMPLE_TEXT = `Rapid Serial Visual Presentation, or RSVP, shows text one word or short phrase at a time in the same location. Paste text or import an article URL, then set your speed and read. Start slow, increase gradually, and pause when the material gets dense.`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+const SAMPLE_TEXT = `Rapid Serial Visual Presentation, or RSVP, shows text one word or short phrase at a time in the same location. Paste text, import a URL, or drag a text-based PDF into the reader. Start slow, increase gradually, and pause when the material gets dense.`;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -31,6 +35,7 @@ function delayForChunk(chunk, wpm) {
   const last = chunk.slice(-1);
   if (".!?".includes(last)) delay += 260;
   if (",;:".includes(last)) delay += 120;
+  if (chunk.length > 16) delay += 40;
   return Math.max(70, delay);
 }
 
@@ -42,8 +47,29 @@ function pivotIndex(word) {
   return 4;
 }
 
+async function readPdf(file, setStatus) {
+  setStatus(`Reading PDF: ${file.name}...`);
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const pageTexts = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    setStatus(`Reading PDF page ${pageNumber} of ${pdf.numPages}...`);
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const pageText = content.items.map((item) => item.str).join(" ");
+    pageTexts.push(pageText);
+  }
+
+  return pageTexts.join(" ");
+}
+
+async function readPlainFile(file) {
+  return await file.text();
+}
+
 function PivotWord({ text, enabled }) {
-  if (!text) return <span>Import or paste text</span>;
+  if (!text) return <span>Drag a PDF here or import text</span>;
   if (!enabled || text.includes(" ")) return <span>{text}</span>;
 
   const marks = ".,!?;:()[]{}\"'“”‘’";
@@ -79,6 +105,7 @@ export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("rsvp:dark") !== "false");
   const [pivot, setPivot] = useState(true);
   const [showText, setShowText] = useState(false);
+  const [dragging, setDragging] = useState(false);
 
   const words = useMemo(() => getWords(text), [text]);
   const chunks = useMemo(() => makeChunks(words, chunkSize), [words, chunkSize]);
@@ -119,6 +146,36 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [maxIndex]);
 
+  async function setLoadedText(rawText, newTitle) {
+    const clean = normalizeText(rawText);
+    if (!clean) {
+      setStatus("No readable text found. If this is a scanned PDF, OCR is the next upgrade.");
+      return;
+    }
+    setText(clean);
+    setTitle(newTitle);
+    setIndex(0);
+    setPlaying(false);
+    setShowText(false);
+    setStatus(`Loaded ${clean.split(" ").length.toLocaleString()} words.`);
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    setPlaying(false);
+    setStatus(`Loading ${file.name}...`);
+
+    try {
+      const lower = file.name.toLowerCase();
+      const isPdf = lower.endsWith(".pdf") || file.type === "application/pdf";
+      const raw = isPdf ? await readPdf(file, setStatus) : await readPlainFile(file);
+      await setLoadedText(raw, file.name);
+    } catch (error) {
+      console.error(error);
+      setStatus("Could not read that file. Try a text-based PDF, TXT, MD, or CSV file.");
+    }
+  }
+
   async function importUrl() {
     const trimmed = url.trim();
     if (!trimmed) return;
@@ -144,17 +201,16 @@ export default function App() {
   }
 
   function loadFile(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setText(normalizeText(reader.result));
-      setTitle(file.name);
-      setIndex(0);
-      setPlaying(false);
-      setStatus(`Loaded ${file.name}.`);
-    };
-    reader.readAsText(file);
+    handleFile(event.target.files?.[0]);
+    event.target.value = "";
+  }
+
+  function onDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragging(false);
+    const file = event.dataTransfer.files?.[0];
+    handleFile(file);
   }
 
   const c = dark ? {
@@ -174,12 +230,18 @@ export default function App() {
           <div>
             <div style={{ color: c.muted, fontSize: 13, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>RSVP Reader</div>
             <h1 style={{ margin: "6px 0 4px", fontSize: "clamp(30px, 8vw, 54px)", lineHeight: 0.98 }}>Read faster. Blink responsibly.</h1>
-            <div style={{ color: c.muted, lineHeight: 1.45 }}>URL import, paste, TXT upload, saved progress, mobile-friendly controls.</div>
+            <div style={{ color: c.muted, lineHeight: 1.45 }}>Drag a PDF into the reader, import a URL, paste text, or upload TXT/MD/CSV.</div>
           </div>
           <button style={button} onClick={() => setDark((d) => !d)}>{dark ? "Light" : "Dark"}</button>
         </header>
 
-        <section style={{ background: c.panel, border: `1px solid ${c.border}`, borderRadius: 26, padding: 16, boxShadow: "0 20px 50px rgba(0,0,0,.20)" }}>
+        <section
+          onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
+          onDrop={onDrop}
+          style={{ background: c.panel, border: `2px dashed ${dragging ? "#ef4444" : c.border}`, borderRadius: 26, padding: 16, boxShadow: "0 20px 50px rgba(0,0,0,.20)", transition: "border-color 120ms ease, transform 120ms ease", transform: dragging ? "scale(1.01)" : "scale(1)" }}
+        >
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", color: c.muted, fontSize: 14, marginBottom: 10 }}>
             <span>{title}</span>
             <span>{words.length.toLocaleString()} words · {progress}%</span>
@@ -187,9 +249,9 @@ export default function App() {
           <div style={{ height: 9, background: c.panel2, borderRadius: 999, overflow: "hidden", marginBottom: 16 }}>
             <div style={{ height: "100%", width: `${progress}%`, background: "#ef4444", transition: "width 120ms linear" }} />
           </div>
-          <div onClick={() => setPlaying((p) => !p)} style={{ minHeight: "min(46vh, 390px)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", border: `1px solid ${c.border}`, borderRadius: 24, background: c.input, padding: 18, userSelect: "none", cursor: "pointer" }}>
+          <div onClick={() => setPlaying((p) => !p)} style={{ minHeight: "min(46vh, 390px)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", border: `1px solid ${dragging ? "#ef4444" : c.border}`, borderRadius: 24, background: dragging ? "rgba(239,68,68,.12)" : c.input, padding: 18, userSelect: "none", cursor: "pointer" }}>
             <div style={{ fontSize: `clamp(38px, 13vw, ${fontSize}px)`, fontWeight: 900, lineHeight: 1.08, maxWidth: "100%", wordBreak: "break-word" }}>
-              <PivotWord text={current} enabled={pivot && chunkSize === 1} />
+              {dragging ? "Drop file to load" : <PivotWord text={current} enabled={pivot && chunkSize === 1} />}
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 14 }}>
@@ -207,7 +269,8 @@ export default function App() {
               <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") importUrl(); }} placeholder="Paste article URL" style={input} />
               <button style={primary} onClick={importUrl}>Import</button>
             </div>
-            <input type="file" accept=".txt,.md,.csv" onChange={loadFile} style={{ color: c.muted }} />
+            <input type="file" accept=".txt,.md,.csv,.pdf,application/pdf" onChange={loadFile} style={{ color: c.muted }} />
+            <div style={{ color: c.muted, fontSize: 14 }}>You can also drag a PDF, TXT, MD, or CSV directly onto the large reader area.</div>
             {status && <div style={{ color: c.muted, fontSize: 14 }}>{status}</div>}
             <button style={button} onClick={() => setShowText((s) => !s)}>{showText ? "Hide text" : "Show/edit text"}</button>
             {showText && <textarea value={text} onChange={(e) => { setText(e.target.value); setTitle("Edited text"); setIndex(0); }} style={{ ...input, minHeight: 230, lineHeight: 1.5, resize: "vertical" }} />}
@@ -220,7 +283,7 @@ export default function App() {
             <label style={{ color: c.muted }}>Font size: {fontSize}px<input type="range" min="38" max="110" step="2" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} style={{ width: "100%" }} /></label>
             <label style={{ color: c.muted }}>Position: {chunks.length ? index + 1 : 0} / {chunks.length}<input type="range" min="0" max={maxIndex} step="1" value={index} onChange={(e) => setIndex(Number(e.target.value))} style={{ width: "100%" }} /></label>
             <label style={{ display: "flex", justifyContent: "space-between", color: c.muted }}>Pivot letter <input type="checkbox" checked={pivot} disabled={chunkSize !== 1} onChange={(e) => setPivot(e.target.checked)} /></label>
-            <div style={{ color: c.muted, border: `1px solid ${c.border}`, borderRadius: 16, padding: 12, background: c.panel2, lineHeight: 1.45 }}>Tip: tap the big word area to play or pause. Start around 250–350 WPM for dense material. Speed without comprehension is just cardio for your eyeballs.</div>
+            <div style={{ color: c.muted, border: `1px solid ${c.border}`, borderRadius: 16, padding: 12, background: c.panel2, lineHeight: 1.45 }}>Tip: tap the big word area to play or pause. Dragging a file onto that same area loads it. Speed without comprehension is just cardio for your eyeballs.</div>
           </div>
         </section>
       </main>
