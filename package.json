@@ -2,17 +2,19 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0 --port ${PORT:-4173}",
-    "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173}"
+    "start": "node server.js"
   },
   "dependencies": {
+    "@mozilla/readability": "latest",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "epubjs": "latest",
+    "express": "latest",
+    "jsdom": "latest",
+    "pdfjs-dist": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "pdfjs-dist": "latest",
-    "epubjs": "latest",
-    "tesseract.js": "latest"
+    "tesseract.js": "latest",
+    "vite": "latest"
   },
   "devDependencies": {}
 }
