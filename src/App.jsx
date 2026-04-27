@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+import Tesseract from "tesseract.js";
+import ePub from "epubjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-const SAMPLE_TEXT = `Rapid Serial Visual Presentation, or RSVP, shows text one word or short phrase at a time in the same location. Paste text, import a URL, or drag a text-based PDF into the reader. Start slow, increase gradually, and pause when the material gets dense.`;
+const SAMPLE_TEXT = `Rapid Serial Visual Presentation, or RSVP, shows text one word or short phrase at a time in the same location. Paste text, import a URL, drag in a PDF, or load an EPUB. Start slow, increase gradually, and pause when the material gets dense.`;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -47,7 +49,12 @@ function pivotIndex(word) {
   return 4;
 }
 
-async function readPdf(file, setStatus) {
+function stripHtml(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return doc.body.textContent || "";
+}
+
+async function readPdfText(file, setStatus) {
   setStatus(`Reading PDF: ${file.name}...`);
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
@@ -61,7 +68,73 @@ async function readPdf(file, setStatus) {
     pageTexts.push(pageText);
   }
 
-  return pageTexts.join(" ");
+  return { text: pageTexts.join(" "), buffer, pageCount: pdf.numPages };
+}
+
+async function ocrPdfBuffer(buffer, pageCount, setStatus) {
+  const loadingTask = pdfjsLib.getDocument({ data: buffer.slice(0) });
+  const pdf = await loadingTask.promise;
+  const ocrTexts = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    setStatus(`OCR scanning page ${pageNumber} of ${pageCount || pdf.numPages}... this can take a bit.`);
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1.8 });
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: context, viewport }).promise;
+
+    const result = await Tesseract.recognize(canvas, "eng", {
+      logger: (message) => {
+        if (message.status === "recognizing text") {
+          setStatus(`OCR page ${pageNumber}: ${Math.round((message.progress || 0) * 100)}%`);
+        }
+      }
+    });
+
+    ocrTexts.push(result.data.text || "");
+  }
+
+  return ocrTexts.join(" ");
+}
+
+async function readPdf(file, setStatus) {
+  const { text, buffer, pageCount } = await readPdfText(file, setStatus);
+  const clean = normalizeText(text);
+
+  if (clean.split(" ").filter(Boolean).length >= Math.max(40, pageCount * 12)) {
+    return clean;
+  }
+
+  setStatus("PDF text layer was sparse. Starting OCR fallback...");
+  return await ocrPdfBuffer(buffer, pageCount, setStatus);
+}
+
+async function readEpub(file, setStatus) {
+  setStatus(`Reading EPUB: ${file.name}...`);
+  const buffer = await file.arrayBuffer();
+  const book = ePub(buffer);
+  await book.ready;
+
+  const spineItems = book.spine?.spineItems || [];
+  const chapterTexts = [];
+
+  for (let i = 0; i < spineItems.length; i += 1) {
+    setStatus(`Reading EPUB chapter ${i + 1} of ${spineItems.length}...`);
+    const item = spineItems[i];
+    try {
+      const doc = await item.load(book.load.bind(book));
+      chapterTexts.push(stripHtml(doc.documentElement.outerHTML));
+      item.unload();
+    } catch (error) {
+      console.warn("Could not read EPUB chapter", error);
+    }
+  }
+
+  book.destroy();
+  return chapterTexts.join(" ");
 }
 
 async function readPlainFile(file) {
@@ -69,7 +142,7 @@ async function readPlainFile(file) {
 }
 
 function PivotWord({ text, enabled }) {
-  if (!text) return <span>Drag a PDF here or import text</span>;
+  if (!text) return <span>Drag a PDF or EPUB here</span>;
   if (!enabled || text.includes(" ")) return <span>{text}</span>;
 
   const marks = ".,!?;:()[]{}\"'“”‘’";
@@ -104,6 +177,7 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [dark, setDark] = useState(() => localStorage.getItem("rsvp:dark") !== "false");
   const [pivot, setPivot] = useState(true);
+  const [focusLine, setFocusLine] = useState(() => localStorage.getItem("rsvp:focusLine") === "true");
   const [showText, setShowText] = useState(false);
   const [dragging, setDragging] = useState(false);
 
@@ -120,6 +194,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem("rsvp:fontSize", String(fontSize)); }, [fontSize]);
   useEffect(() => { localStorage.setItem("rsvp:index", String(index)); }, [index]);
   useEffect(() => { localStorage.setItem("rsvp:dark", String(dark)); }, [dark]);
+  useEffect(() => { localStorage.setItem("rsvp:focusLine", String(focusLine)); }, [focusLine]);
 
   useEffect(() => { setIndex((old) => clamp(old, 0, maxIndex)); }, [maxIndex]);
 
@@ -149,7 +224,7 @@ export default function App() {
   async function setLoadedText(rawText, newTitle) {
     const clean = normalizeText(rawText);
     if (!clean) {
-      setStatus("No readable text found. If this is a scanned PDF, OCR is the next upgrade.");
+      setStatus("No readable text found. OCR may not have detected text clearly.");
       return;
     }
     setText(clean);
@@ -168,11 +243,12 @@ export default function App() {
     try {
       const lower = file.name.toLowerCase();
       const isPdf = lower.endsWith(".pdf") || file.type === "application/pdf";
-      const raw = isPdf ? await readPdf(file, setStatus) : await readPlainFile(file);
+      const isEpub = lower.endsWith(".epub") || file.type === "application/epub+zip";
+      const raw = isPdf ? await readPdf(file, setStatus) : isEpub ? await readEpub(file, setStatus) : await readPlainFile(file);
       await setLoadedText(raw, file.name);
     } catch (error) {
       console.error(error);
-      setStatus("Could not read that file. Try a text-based PDF, TXT, MD, or CSV file.");
+      setStatus("Could not read that file. Try PDF, EPUB, TXT, MD, or CSV. If OCR failed, try a clearer scan.");
     }
   }
 
@@ -230,7 +306,7 @@ export default function App() {
           <div>
             <div style={{ color: c.muted, fontSize: 13, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>RSVP Reader</div>
             <h1 style={{ margin: "6px 0 4px", fontSize: "clamp(30px, 8vw, 54px)", lineHeight: 0.98 }}>Read faster. Blink responsibly.</h1>
-            <div style={{ color: c.muted, lineHeight: 1.45 }}>Drag a PDF into the reader, import a URL, paste text, or upload TXT/MD/CSV.</div>
+            <div style={{ color: c.muted, lineHeight: 1.45 }}>Drag in PDF, EPUB, TXT, MD, or CSV. Scanned PDFs use OCR automatically when needed.</div>
           </div>
           <button style={button} onClick={() => setDark((d) => !d)}>{dark ? "Light" : "Dark"}</button>
         </header>
@@ -249,8 +325,9 @@ export default function App() {
           <div style={{ height: 9, background: c.panel2, borderRadius: 999, overflow: "hidden", marginBottom: 16 }}>
             <div style={{ height: "100%", width: `${progress}%`, background: "#ef4444", transition: "width 120ms linear" }} />
           </div>
-          <div onClick={() => setPlaying((p) => !p)} style={{ minHeight: "min(46vh, 390px)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", border: `1px solid ${dragging ? "#ef4444" : c.border}`, borderRadius: 24, background: dragging ? "rgba(239,68,68,.12)" : c.input, padding: 18, userSelect: "none", cursor: "pointer" }}>
-            <div style={{ fontSize: `clamp(38px, 13vw, ${fontSize}px)`, fontWeight: 900, lineHeight: 1.08, maxWidth: "100%", wordBreak: "break-word" }}>
+          <div onClick={() => setPlaying((p) => !p)} style={{ position: "relative", minHeight: "min(46vh, 390px)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", border: `1px solid ${dragging ? "#ef4444" : c.border}`, borderRadius: 24, background: dragging ? "rgba(239,68,68,.12)" : c.input, padding: 18, userSelect: "none", cursor: "pointer", overflow: "hidden" }}>
+            {focusLine && !dragging && <div style={{ position: "absolute", left: "50%", top: 16, bottom: 16, width: 1, background: dark ? "rgba(255,255,255,.65)" : "rgba(15,23,42,.38)", transform: "translateX(-50%)", pointerEvents: "none" }} />}
+            <div style={{ position: "relative", zIndex: 1, fontSize: `clamp(38px, 13vw, ${fontSize}px)`, fontWeight: 900, lineHeight: 1.08, maxWidth: "100%", wordBreak: "break-word" }}>
               {dragging ? "Drop file to load" : <PivotWord text={current} enabled={pivot && chunkSize === 1} />}
             </div>
           </div>
@@ -269,8 +346,8 @@ export default function App() {
               <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") importUrl(); }} placeholder="Paste article URL" style={input} />
               <button style={primary} onClick={importUrl}>Import</button>
             </div>
-            <input type="file" accept=".txt,.md,.csv,.pdf,application/pdf" onChange={loadFile} style={{ color: c.muted }} />
-            <div style={{ color: c.muted, fontSize: 14 }}>You can also drag a PDF, TXT, MD, or CSV directly onto the large reader area.</div>
+            <input type="file" accept=".txt,.md,.csv,.pdf,.epub,application/pdf,application/epub+zip" onChange={loadFile} style={{ color: c.muted }} />
+            <div style={{ color: c.muted, fontSize: 14 }}>You can also drag PDF, EPUB, TXT, MD, or CSV directly onto the large reader area.</div>
             {status && <div style={{ color: c.muted, fontSize: 14 }}>{status}</div>}
             <button style={button} onClick={() => setShowText((s) => !s)}>{showText ? "Hide text" : "Show/edit text"}</button>
             {showText && <textarea value={text} onChange={(e) => { setText(e.target.value); setTitle("Edited text"); setIndex(0); }} style={{ ...input, minHeight: 230, lineHeight: 1.5, resize: "vertical" }} />}
@@ -283,7 +360,8 @@ export default function App() {
             <label style={{ color: c.muted }}>Font size: {fontSize}px<input type="range" min="38" max="110" step="2" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} style={{ width: "100%" }} /></label>
             <label style={{ color: c.muted }}>Position: {chunks.length ? index + 1 : 0} / {chunks.length}<input type="range" min="0" max={maxIndex} step="1" value={index} onChange={(e) => setIndex(Number(e.target.value))} style={{ width: "100%" }} /></label>
             <label style={{ display: "flex", justifyContent: "space-between", color: c.muted }}>Pivot letter <input type="checkbox" checked={pivot} disabled={chunkSize !== 1} onChange={(e) => setPivot(e.target.checked)} /></label>
-            <div style={{ color: c.muted, border: `1px solid ${c.border}`, borderRadius: 16, padding: 12, background: c.panel2, lineHeight: 1.45 }}>Tip: tap the big word area to play or pause. Dragging a file onto that same area loads it. Speed without comprehension is just cardio for your eyeballs.</div>
+            <label style={{ display: "flex", justifyContent: "space-between", color: c.muted }}>Focus line <input type="checkbox" checked={focusLine} onChange={(e) => setFocusLine(e.target.checked)} /></label>
+            <div style={{ color: c.muted, border: `1px solid ${c.border}`, borderRadius: 16, padding: 12, background: c.panel2, lineHeight: 1.45 }}>Tip: the focus line aligns with the red pivot letter. OCR is slower because your browser is doing the brainy little monk work locally.</div>
           </div>
         </section>
       </main>
