@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import Tesseract from "tesseract.js";
-import ePub from "epubjs";
+import JSZip from "jszip";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -49,9 +49,29 @@ function pivotIndex(word) {
   return 4;
 }
 
+function xmlAttr(node, name) {
+  return node?.getAttribute(name) || "";
+}
+
+function cleanPath(path) {
+  const parts = [];
+  for (const part of path.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts.join("/");
+}
+
+function joinPath(base, href) {
+  if (!base) return cleanPath(decodeURIComponent(href));
+  return cleanPath(decodeURIComponent(`${base}/${href}`));
+}
+
 function stripHtml(html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  return doc.body.textContent || "";
+  doc.querySelectorAll("script, style, nav, header, footer").forEach((el) => el.remove());
+  return doc.body?.textContent || doc.documentElement?.textContent || "";
 }
 
 async function readPdfText(file, setStatus) {
@@ -104,9 +124,7 @@ async function readPdf(file, setStatus) {
   const { text, buffer, pageCount } = await readPdfText(file, setStatus);
   const clean = normalizeText(text);
 
-  if (clean.split(" ").filter(Boolean).length >= Math.max(40, pageCount * 12)) {
-    return clean;
-  }
+  if (clean.split(" ").filter(Boolean).length >= Math.max(40, pageCount * 12)) return clean;
 
   setStatus("PDF text layer was sparse. Starting OCR fallback...");
   return await ocrPdfBuffer(buffer, pageCount, setStatus);
@@ -114,27 +132,62 @@ async function readPdf(file, setStatus) {
 
 async function readEpub(file, setStatus) {
   setStatus(`Reading EPUB: ${file.name}...`);
-  const buffer = await file.arrayBuffer();
-  const book = ePub(buffer);
-  await book.ready;
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const parser = new DOMParser();
 
-  const spineItems = book.spine?.spineItems || [];
-  const chapterTexts = [];
+  const containerEntry = zip.file("META-INF/container.xml");
+  if (!containerEntry) throw new Error("Invalid EPUB: missing META-INF/container.xml");
 
-  for (let i = 0; i < spineItems.length; i += 1) {
-    setStatus(`Reading EPUB chapter ${i + 1} of ${spineItems.length}...`);
-    const item = spineItems[i];
-    try {
-      const doc = await item.load(book.load.bind(book));
-      chapterTexts.push(stripHtml(doc.documentElement.outerHTML));
-      item.unload();
-    } catch (error) {
-      console.warn("Could not read EPUB chapter", error);
-    }
+  const containerXml = await containerEntry.async("text");
+  const containerDoc = parser.parseFromString(containerXml, "application/xml");
+  const rootfilePath = xmlAttr(containerDoc.querySelector("rootfile"), "full-path");
+  if (!rootfilePath) throw new Error("Invalid EPUB: missing OPF rootfile path");
+
+  const opfEntry = zip.file(rootfilePath);
+  if (!opfEntry) throw new Error(`Invalid EPUB: missing ${rootfilePath}`);
+
+  const opfXml = await opfEntry.async("text");
+  const opfDoc = parser.parseFromString(opfXml, "application/xml");
+  const opfBase = rootfilePath.includes("/") ? rootfilePath.slice(0, rootfilePath.lastIndexOf("/")) : "";
+
+  const manifest = new Map();
+  opfDoc.querySelectorAll("manifest item").forEach((item) => {
+    const id = xmlAttr(item, "id");
+    const href = xmlAttr(item, "href");
+    if (id && href) manifest.set(id, href);
+  });
+
+  let spineIds = Array.from(opfDoc.querySelectorAll("spine itemref")).map((item) => xmlAttr(item, "idref")).filter(Boolean);
+
+  if (!spineIds.length) {
+    spineIds = Array.from(manifest.keys());
   }
 
-  book.destroy();
-  return chapterTexts.join(" ");
+  const texts = [];
+
+  for (let i = 0; i < spineIds.length; i += 1) {
+    const href = manifest.get(spineIds[i]);
+    if (!href) continue;
+
+    const noHashHref = href.split("#")[0];
+    const fullPath = joinPath(opfBase, noHashHref);
+    const entry = zip.file(fullPath);
+    if (!entry) continue;
+
+    const lower = fullPath.toLowerCase();
+    if (!lower.endsWith(".xhtml") && !lower.endsWith(".html") && !lower.endsWith(".htm") && !lower.endsWith(".xml")) continue;
+
+    setStatus(`Reading EPUB section ${i + 1} of ${spineIds.length}...`);
+    const html = await entry.async("text");
+    texts.push(stripHtml(html));
+  }
+
+  const joined = texts.join(" ");
+  if (!normalizeText(joined)) {
+    throw new Error("No readable EPUB text found in spine documents.");
+  }
+
+  return joined;
 }
 
 async function readPlainFile(file) {
@@ -224,7 +277,7 @@ export default function App() {
   async function setLoadedText(rawText, newTitle) {
     const clean = normalizeText(rawText);
     if (!clean) {
-      setStatus("No readable text found. OCR may not have detected text clearly.");
+      setStatus("No readable text found. EPUB may be DRM-protected or contain unusual encrypted content.");
       return;
     }
     setText(clean);
@@ -248,7 +301,7 @@ export default function App() {
       await setLoadedText(raw, file.name);
     } catch (error) {
       console.error(error);
-      setStatus("Could not read that file. Try PDF, EPUB, TXT, MD, or CSV. If OCR failed, try a clearer scan.");
+      setStatus(`Could not read that file: ${error.message || "unknown error"}`);
     }
   }
 
