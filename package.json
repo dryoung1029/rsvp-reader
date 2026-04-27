@@ -1,20 +1,18 @@
 {
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "vite",
     "build": "vite build",
     "start": "node server.cjs"
   },
   "dependencies": {
-    "@mozilla/readability": "latest",
-    "@vitejs/plugin-react": "latest",
-    "epubjs": "latest",
-    "express": "latest",
-    "jsdom": "latest",
-    "pdfjs-dist": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "tesseract.js": "latest",
-    "vite": "latest"
-  },
-  "devDependencies": {}
+    "vite": "latest",
+    "express": "latest",
+    "jsdom": "latest",
+    "@mozilla/readability": "latest",
+    "pdfjs-dist": "latest",
+    "epubjs": "latest",
+    "tesseract.js": "latest"
+  }
 }
