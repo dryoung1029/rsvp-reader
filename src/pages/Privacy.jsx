@@ -28,8 +28,9 @@ export default function Privacy() {
 
       <h2>Reading stats</h2>
       <p>
-        RAFAS records how many words you read each day and for how long, to show your progress and streaks. If you join
-        the family board, other people on the board see your weekly total, streak and average speed. They never see
+        RAFAS records how many words you read each day and for how long, and each sitting's length, speed setting and
+        hour of the day, to show your progress, streaks and achievements. If you join the family board, other people
+        on the board see your totals, streaks, speeds, level, achievements and competition results. They never see
         what you're reading.
       </p>
 

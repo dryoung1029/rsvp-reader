@@ -1,23 +1,24 @@
 // Reading stats: words read and time spent reading, per person per local day.
 import { HttpError, json, readJson } from "./util.js";
 import { requireUser } from "./auth.js";
+import { evaluate } from "./game.js";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function shiftDay(day, delta) {
+export function shiftDay(day, delta) {
   const d = new Date(`${day}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + delta);
   return d.toISOString().slice(0, 10);
 }
 
-function todayFrom(request) {
+export function todayFrom(request) {
   const day = new URL(request.url).searchParams.get("today") || "";
   return DAY_RE.test(day) ? day : new Date().toISOString().slice(0, 10);
 }
 
 // Consecutive days with some reading, ending today (or yesterday, so a streak
 // isn't shown as broken before you've had a chance to read today).
-function streakFrom(daysWithReading, today) {
+export function streakFrom(daysWithReading, today) {
   const set = new Set(daysWithReading);
   let day = set.has(today) ? today : shiftDay(today, -1);
   let streak = 0;
@@ -83,8 +84,26 @@ export async function handleStats(request, env, pathname) {
          ON CONFLICT (user_id, day) DO UPDATE SET words = words + excluded.words, ms = ms + excluded.ms`
       ).bind(user.id, e.day, words, ms));
     }
+    // Sittings (Play until Pause), used for speed and time-of-day achievements.
+    const now = Date.now();
+    for (const sess of Array.isArray(body.sessions) ? body.sessions.slice(0, 50) : []) {
+      if (!DAY_RE.test(String(sess.day || ""))) continue;
+      const words = Math.max(0, Math.min(100000, Math.floor(Number(sess.words) || 0)));
+      const ms = Math.max(0, Math.min(12 * 3600 * 1000, Math.floor(Number(sess.ms) || 0)));
+      const wpm = Math.max(0, Math.min(1000, Math.floor(Number(sess.wpm) || 0)));
+      const hour = Math.max(0, Math.min(23, Math.floor(Number(sess.hour) || 0)));
+      if (words < 20) continue;
+      // Sanity check: the words can't have gone by faster than the speed setting allows.
+      if (ms < (words / Math.max(wpm, 1)) * 60000 * 0.6) continue;
+      statements.push(env.DB.prepare(
+        "INSERT INTO reading_sessions (user_id, day, hour, words, ms, wpm, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(user.id, sess.day, hour, words, ms, wpm, now));
+    }
     if (statements.length) await env.DB.batch(statements);
-    return json({ ok: true });
+    const today = DAY_RE.test(String(body.today || "")) ? body.today : entries[0]?.day;
+    const unlocked = statements.length ? await evaluate(env, user.id, today) : [];
+    const todayRow = today ? await env.DB.prepare("SELECT words FROM reading_days WHERE user_id = ? AND day = ?").bind(user.id, today).first() : null;
+    return json({ ok: true, unlocked, todayWords: todayRow?.words || 0, dailyGoal: user.daily_goal || 0 });
   }
 
   const today = todayFrom(request);

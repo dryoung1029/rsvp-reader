@@ -9,6 +9,7 @@ const SECTIONS = [
   ["reading", "Reading controls"],
   ["pacing", "Pacing and chapters"],
   ["progress", "Progress and family board"],
+  ["achievements", "Achievements, levels and competitions"],
   ["sending", "Sending to family"],
   ["bookmarklet", "Saving pages on a computer"],
   ["keys", "Keyboard shortcuts"],
@@ -162,6 +163,37 @@ export default function Help({ inboxEmail, signedIn }) {
           The <b>family board</b> is optional. If you join it, the others on it can see your words this week, your
           streak and your average speed, and you can see theirs. Nobody sees what anyone is reading. Leave it any time.
         </p>
+      </section>
+
+      <section id="achievements">
+        <h2>Achievements, levels and competitions</h2>
+        <h3>Achievements</h3>
+        <p>
+          There are 36 achievements to earn for reading a lot, reading fast, keeping a streak, finishing documents,
+          sharing with family and doing well in competitions. Each is worth points: bronze ones are easy, gold and
+          purple ones take real effort. A couple are secret until you earn them. A pop-up tells you when you unlock one.
+          See them all, with your progress toward each, under <Link to="/progress/achievements">Progress → Achievements</Link>.
+        </p>
+        <p>
+          Speed achievements count a whole sitting (from Play to Pause) at the slowest speed you used during it, so
+          you have to hold the pace. Sittings that went by faster than the speed setting allows don't count.
+        </p>
+        <h3>Levels</h3>
+        <p>
+          You earn XP from reading (1 XP per 100 words) and from achievements (5 XP per point). Levels come with
+          titles, from Skimmer up to Swizz Class.
+        </p>
+        <h3>Daily goal</h3>
+        <p>Set a number of words to read each day on the Progress page. You'll get a pop-up when you reach it.</p>
+        <h3>Monthly competitions</h3>
+        <p>
+          Everyone on the family board is automatically entered. Each calendar month there are four categories: most
+          words, top speed (fastest sitting of 1,000+ words), most documents finished and most days read. Whoever
+          reads the most words is the month's champion, and the top 3 earn a podium achievement once the month ends.
+          Past champions are listed on the <Link to="/progress/compete">Compete</Link> tab.
+        </p>
+        <h3>Leaderboards</h3>
+        <p>All-time rankings for level, words, achievements, best streak, top speed and titles won, plus a feed of who unlocked what.</p>
       </section>
 
       <section id="sending">

@@ -41,6 +41,7 @@ export function publicUser(user) {
     isAdmin: Boolean(user.is_admin),
     hasInboxToken: Boolean(user.inbox_token_hash),
     shareStats: Boolean(user.share_stats),
+    dailyGoal: user.daily_goal || 0,
     createdAt: user.created_at
   };
 }
@@ -289,7 +290,8 @@ export async function handleAuth(request, env, pathname) {
         if (!next.name) throw new HttpError(400, "Please enter a name.");
       }
       if (body.shareStats !== undefined) next.share_stats = body.shareStats ? 1 : 0;
-      await env.DB.prepare("UPDATE users SET name = ?, share_stats = ? WHERE id = ?").bind(next.name, next.share_stats, user.id).run();
+      if (body.dailyGoal !== undefined) next.daily_goal = Math.max(0, Math.min(100000, Math.floor(Number(body.dailyGoal) || 0)));
+      await env.DB.prepare("UPDATE users SET name = ?, share_stats = ?, daily_goal = ? WHERE id = ?").bind(next.name, next.share_stats, next.daily_goal || 0, user.id).run();
       return json({ user: publicUser(next) });
     }
     if (method === "DELETE") {
@@ -384,6 +386,9 @@ export async function deleteUserData(env, userId) {
     env.DB.prepare("DELETE FROM documents WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM reading_days WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM reading_sessions WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM user_events WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM achievements WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId)
   ]);
   if (env.INBOX) {

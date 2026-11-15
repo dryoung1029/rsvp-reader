@@ -228,6 +228,8 @@ export default function Account({ user, setUser, config, onSignOut }) {
         )}
       </section>
 
+      <p className="muted small">Questions? See <Link to="/help">Help</Link>.</p>
+
       <Bookmarklet />
 
       {user.isAdmin && <InviteAdmin />}
