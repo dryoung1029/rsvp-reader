@@ -12,7 +12,7 @@ import { syncLibrary, uploadDoc, downloadText, pushPosition, deleteEverywhere, u
 import { chooseFromDropbox, chooseFromGoogleDrive } from "./lib/cloud.js";
 import { api } from "./lib/api.js";
 import { Link, navigate } from "./router.jsx";
-import { getStatsTracker } from "./lib/stats.js";
+import { getStatsTracker, checkAchievements } from "./lib/stats.js";
 import Sheet from "./components/Sheet.jsx";
 import ContextView from "./components/ContextView.jsx";
 
@@ -487,7 +487,7 @@ export default function Reader({ user, config, visible, path }) {
     if (playing) {
       setTouched(true);
       if (Date.now() - pausedAtRef.current > 10000) rampStartRef.current = Date.now();
-      stats.start();
+      stats.start(wpm);
       const interval = setInterval(() => stats.flush(), 60000);
       return () => clearInterval(interval);
     }
@@ -495,7 +495,19 @@ export default function Reader({ user, config, visible, path }) {
     stats.stop();
     stats.flush();
     return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, stats]);
+  useEffect(() => { if (playing) stats.noteWpm(wpm); }, [playing, wpm, stats]);
+
+  // Reaching the end of a document: once the position has synced, ask the
+  // server whether that earned anything.
+  const finishCheckedRef = useRef(null);
+  useEffect(() => {
+    if (!docId || chunks.length < 2 || index < maxIndex || finishCheckedRef.current === docId) return undefined;
+    finishCheckedRef.current = docId;
+    const t = setTimeout(() => checkAchievements(), 3500);
+    return () => clearTimeout(t);
+  }, [docId, index, maxIndex, chunks.length]);
 
   // Keep the screen awake while words are flashing.
   useEffect(() => {
@@ -709,6 +721,7 @@ export default function Reader({ user, config, visible, path }) {
       setSheet(null);
       setSendNote("");
       setStatus(`Sent "${doc.title}" to ${member.name}.`);
+      checkAchievements();
     } catch (error) {
       setStatus(`Couldn't send it: ${error.message}`);
     } finally {

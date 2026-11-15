@@ -3,6 +3,7 @@
 // stored in `document_text` in chunks below D1's 2 MB row limit.
 import { HttpError, json, readJson, escHtml, appOrigin } from "./util.js";
 import { requireUser, sendEmail } from "./auth.js";
+import { logEvent } from "./game.js";
 
 const CHUNK_BYTES = 900 * 1024;
 const MAX_TEXT_BYTES = 40 * 1024 * 1024;
@@ -94,6 +95,7 @@ export async function handleDocs(request, env, pathname) {
           int(body.positionAt, now), int(body.createdAt, now), now, int(body.lastOpenedAt, now),
           cleanChapters(body.chapters), String(body.sharedBy || "").slice(0, 60)
         ).run();
+        if (body.source && body.source !== "shared") await logEvent(env, user.id, "import", { meta: String(body.source) }).run();
       }
       const row = await getOwnedDoc(env, user.id, body.id);
       return json({ doc: docView(row) }, existing ? 200 : 201);
@@ -154,7 +156,15 @@ export async function handleDocs(request, env, pathname) {
       binds.push(Date.now());
       await env.DB.prepare(`UPDATE documents SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, id).run();
     }
-    return json({ doc: docView(await getOwnedDoc(env, user.id, id)) });
+    const updated = await getOwnedDoc(env, user.id, id);
+    // First time reaching the end counts as finishing it.
+    if (!updated.finished_at && updated.word_count > 0 && updated.read_words >= updated.word_count - 1) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE documents SET finished_at = ? WHERE id = ? AND finished_at IS NULL").bind(Date.now(), id),
+        logEvent(env, user.id, "finished", { value: updated.word_count, meta: updated.source })
+      ]);
+    }
+    return json({ doc: docView(updated) });
   }
 
   if (method === "DELETE") {
@@ -189,7 +199,9 @@ async function sendDoc(request, env, user, id) {
        SELECT ?, ?, title, 'shared', source_url, word_count, chars, 0, 0, 0, 1, text_bytes, ?, ?, ?, chapters, ?
        FROM documents WHERE id = ?`
     ).bind(newId, recipient.id, now, now, now, user.name || user.email, id),
-    env.DB.prepare("INSERT INTO document_text (doc_id, seq, data) SELECT ?, seq, data FROM document_text WHERE doc_id = ?").bind(newId, id)
+    env.DB.prepare("INSERT INTO document_text (doc_id, seq, data) SELECT ?, seq, data FROM document_text WHERE doc_id = ?").bind(newId, id),
+    logEvent(env, user.id, "sent", { value: 1 }),
+    logEvent(env, recipient.id, "received", { value: 1 })
   ]);
 
   const from = user.name || user.email;

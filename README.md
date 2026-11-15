@@ -14,6 +14,7 @@ Live at **https://rafas.app** (Cloudflare Workers).
 - Installable PWA that appears in the Android Share menu.
 - Personal inbox per member: email from your sign-in address, or an iPhone Shortcut with a personal token.
 - Reading stats (words, time, streaks, average speed, 14-day chart) and an opt-in family board.
+- Gamification: 36 achievements with points and tiers, XP levels, a daily goal, monthly competitions (words, speed, finished, days read), all-time leaderboards and a family activity feed.
 - Context view when paused; chapters for EPUB, PDF bookmarks, Word headings, and Markdown/HTML headings.
 - Smart pacing (time spent on long words, not short common ones) and a 30-second warm-up.
 - Send a document to another member, with an email notice.
@@ -26,8 +27,9 @@ Live at **https://rafas.app** (Cloudflare Workers).
 | `src/` | React frontend (Vite). `App.jsx` holds the reader; `pages/` has About, Help, Privacy. |
 | `src/lib/` | Text helpers, file parsers (PDF, EPUB, OCR), IndexedDB library. |
 | `public/` | Manifest, icons, service worker (`sw.js`). |
-| `worker/` | Cloudflare Worker. `auth.js` (sign-in, sessions, invites, admin), `docs.js` (library sync, sending), `stats.js`, `inbox.js`, `importer.js` (links and share links), `index.js` (router and email handler). |
-| `migrations/` | D1 database schema. |
+| `worker/` | Cloudflare Worker. `auth.js` (sign-in, sessions, invites, admin), `docs.js` (library sync, sending), `stats.js`, `game.js` (achievements, competitions, leaderboards), `inbox.js`, `importer.js` (links and share links), `index.js` (router and email handler). |
+| `migrations/` | D1 database schema. Apply new ones with `npx wrangler d1 migrations apply rafas --remote` before deploying. |
+| `shared/achievements.js` | Achievement definitions and level maths, used by both the Worker and the app. |
 | `wrangler.jsonc` | Worker config: static assets, D1, KV, custom domain, public settings. |
 
 ## Local development

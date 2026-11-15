@@ -9,6 +9,7 @@ import Privacy from "./pages/Privacy.jsx";
 import SignIn from "./pages/SignIn.jsx";
 import Account from "./pages/Account.jsx";
 import Progress from "./pages/Progress.jsx";
+import Toasts from "./components/Toasts.jsx";
 
 const PAGE_TITLES = {
   "/": APP_NAME, "/about": `About · ${APP_NAME}`, "/help": `Help · ${APP_NAME}`, "/privacy": `Privacy · ${APP_NAME}`,
@@ -78,7 +79,7 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    document.title = PAGE_TITLES[path] || (path.startsWith("/join/") ? `Join · ${APP_NAME}` : APP_NAME);
+    document.title = PAGE_TITLES[path] || (path.startsWith("/join/") ? `Join · ${APP_NAME}` : path.startsWith("/progress") ? `Progress · ${APP_NAME}` : APP_NAME);
   }, [path]);
 
   // Pick the right local library before the reader mounts.
@@ -110,7 +111,7 @@ export default function App() {
   else if (user === undefined) page = <div className="page"><p className="muted">Loading...</p></div>;
   else if (user) {
     if (path === "/account") page = <Account user={user} setUser={setUser} config={config} onSignOut={onSignOut} />;
-    else if (path === "/progress") page = <Progress user={user} setUser={setUser} />;
+    else if (path === "/progress" || path.startsWith("/progress/")) page = <Progress user={user} setUser={setUser} tab={path.split("/")[2] || "overview"} />;
     else if (path === "/add") page = null;
     else if (joinMatch || path === "/signin" || path === "/verify") {
       page = (
@@ -123,7 +124,7 @@ export default function App() {
     } else if (path !== "/") page = <article className="page"><h1>Page not found</h1><p><Link to="/">Back to reading</Link></p></article>;
   } else if (joinMatch) page = <SignIn key={joinMatch[1]} mode="join" inviteCode={joinMatch[1].toLowerCase()} onSignedIn={onSignedIn} />;
   else if (path === "/verify") page = <SignIn mode="verify" onSignedIn={onSignedIn} />;
-  else if (["/signin", "/", "/account", "/progress", "/add"].includes(path)) page = <Landing onSignedIn={onSignedIn} />;
+  else if (["/signin", "/", "/account", "/progress", "/add"].includes(path) || path.startsWith("/progress/")) page = <Landing onSignedIn={onSignedIn} />;
   else page = <article className="page"><h1>Page not found</h1><p><Link to="/">Home</Link></p></article>;
 
   return (
@@ -135,8 +136,8 @@ export default function App() {
         </Link>
         <nav className="nav" aria-label="Main">
           {user && <button onClick={showLibrary}>Library</button>}
-          {user && <Link to="/progress" aria-current={path === "/progress" ? "page" : undefined}>Progress</Link>}
-          <Link to="/help" aria-current={path === "/help" ? "page" : undefined}>Help</Link>
+          {user && <Link to="/progress" aria-current={path.startsWith("/progress") ? "page" : undefined}>Progress</Link>}
+          <Link to="/help" className={user ? "nav-help" : ""} aria-current={path === "/help" ? "page" : undefined}>Help</Link>
           {!user && <Link to="/about" aria-current={path === "/about" ? "page" : undefined}>About</Link>}
           {user && (
             <Link to="/account" aria-current={path === "/account" ? "page" : undefined} className="avatar-link" title={`Account (${user.email})`}>
@@ -155,6 +156,8 @@ export default function App() {
         {user && config && <Reader key={user.id} user={user} config={config} path={path} visible={path === "/" || path === "/add"} />}
         {page}
       </main>
+
+      {user && <Toasts />}
 
       <footer className="footer">
         <span>{APP_NAME} · {APP_LONG_NAME}</span>
