@@ -3,7 +3,9 @@ import { Link } from "../router.jsx";
 
 const SECTIONS = [
   ["start", "Getting started"],
+  ["account", "Your account"],
   ["adding", "Adding documents"],
+  ["cloud", "Google Drive, Dropbox, iCloud"],
   ["reading", "Reading controls"],
   ["keys", "Keyboard shortcuts"],
   ["library", "Library"],
@@ -13,7 +15,7 @@ const SECTIONS = [
   ["trouble", "Troubleshooting"]
 ];
 
-export default function Help({ inboxEmail, inboxEnabled, hasToken }) {
+export default function Help({ inboxEmail, signedIn }) {
   const origin = window.location.origin;
   return (
     <article className="page">
@@ -26,6 +28,7 @@ export default function Help({ inboxEmail, inboxEnabled, hasToken }) {
       <section id="start">
         <h2>Getting started</h2>
         <ol>
+          <li>Sign in with your email{signedIn ? "" : " (you'll need an invite link the first time)"}.</li>
           <li>Add something to read: a file, a web link, or pasted text (see below).</li>
           <li>Press <b>Play</b>, or tap the middle of the word area.</li>
           <li>Adjust <b>Speed</b> until you can follow comfortably. 250 to 350 words per minute is a good start.</li>
@@ -33,12 +36,39 @@ export default function Help({ inboxEmail, inboxEnabled, hasToken }) {
         </ol>
       </section>
 
+      <section id="account">
+        <h2>Your account</h2>
+        <p>
+          Everyone has their own account and their own library. There are no passwords: when you sign in, RAFAS emails
+          you a 6-digit code. Type the code in, or tap the button in the email.
+        </p>
+        <p className="callout">
+          On iPhone, if you added RAFAS to your Home Screen, type the code into the app. The button in the email opens
+          Safari, which signs in Safari rather than the Home Screen app.
+        </p>
+        <h3>Joining</h3>
+        <p>
+          New people join with an invite link from someone who manages RAFAS. Open the link, enter your name and email,
+          then the code. Invite links can be limited to a number of people or a number of days.
+        </p>
+        <h3>Inviting family (admins)</h3>
+        <p>
+          Go to <Link to="/account">Account</Link> → <b>Invite people</b>, create a link, and send it by text or email.
+          You can see who has joined and turn a link off at any time.
+        </p>
+        <h3>Phone and computer</h3>
+        <p>
+          Sign in on each device with the same email. Your library and your place in every document follow you. Stop
+          reading on your phone and the computer picks up from the same word next time you open it.
+        </p>
+      </section>
+
       <section id="adding">
         <h2>Adding documents</h2>
         <h3>Files</h3>
         <p>
           Use <b>Choose file</b> in the Add panel, or on a computer drag a file onto the reader. Supported: PDF, EPUB,
-          TXT, Markdown, CSV and HTML. If a PDF is a scan with no text in it, RAFAS recognizes the text from the page
+          Word (.docx), TXT, Markdown, CSV and HTML. If a PDF is a scan with no text in it, RAFAS recognizes the text from the page
           images. That runs on your device and takes a while for long documents.
         </p>
         <h3>Web articles</h3>
@@ -51,6 +81,30 @@ export default function Help({ inboxEmail, inboxEnabled, hasToken }) {
           Paste into the text box and press <b>Save &amp; read</b>. If you paste only a link, it is imported as an
           article. On a phone, <b>Paste from clipboard</b> does it in one tap.
         </p>
+      </section>
+
+      <section id="cloud">
+        <h2>Google Drive, Dropbox, iCloud</h2>
+        <h3>Google Drive and Google Docs</h3>
+        <p>
+          Press <b>Google Drive</b> in the Add panel and pick a file. The first time, Google asks you to allow RAFAS to
+          open the files you choose. RAFAS can only see files you pick. Google Docs come in as text; PDFs, Word files and
+          EPUBs are read on your device.
+        </p>
+        <h3>Dropbox</h3>
+        <p>Press <b>Dropbox</b> in the Add panel, sign in to Dropbox if asked, and pick a file.</p>
+        <h3>iCloud Drive</h3>
+        <p>
+          Apple doesn't offer a way for websites to browse iCloud Drive directly, but your device does. On iPhone or
+          iPad, tap <b>Choose file</b> → <b>Browse</b> → <b>iCloud Drive</b>. On a Mac, iCloud Drive is in the sidebar of
+          the file window. On Windows, use the iCloud Drive folder if the iCloud app is installed.
+        </p>
+        <h3>Share links</h3>
+        <p>
+          You can also paste a share link into the article box and press <b>Import</b>. This works for Google Docs,
+          Google Drive files, Dropbox and OneDrive, as long as the file is shared as "Anyone with the link".
+        </p>
+        <p className="muted small">The Google Drive and Dropbox buttons only appear once they've been set up for this site.</p>
       </section>
 
       <section id="reading">
@@ -90,12 +144,12 @@ export default function Help({ inboxEmail, inboxEnabled, hasToken }) {
         <h2>Library</h2>
         <p>
           Everything you open is saved in your library with your progress and the time left at your current speed.
-          Open any document to continue exactly where you stopped. Adding the same document again reopens your
-          saved copy instead of making a duplicate. Use ✕ to delete a document.
+          Open any document to continue exactly where you stopped, on any device you're signed in on. Adding the same
+          document again reopens your saved copy instead of making a duplicate. Use ✕ to delete a document everywhere.
         </p>
-        <p className="callout">
-          The library is stored in the browser on each device. Your phone and your computer each keep their own
-          library. Private or incognito windows don't keep anything after they close.
+        <p>
+          Each device also keeps a copy, so documents you've opened before still work without a connection. Changes
+          sync when you're back online. Press <b>Sync</b> in the library to check right away.
         </p>
       </section>
 
@@ -119,17 +173,16 @@ export default function Help({ inboxEmail, inboxEnabled, hasToken }) {
 
         <h3>iPhone and iPad</h3>
         <p>
-          iOS doesn't let web apps appear in the Share menu, so RAFAS uses a Shortcut that drops items in your private
-          inbox. RAFAS picks them up the next time you open it. This needs the <b>inbox token</b>, which is set by
-          whoever runs this site{hasToken ? " (you've already saved it on this device)" : ""}.
-          {!inboxEnabled && <> <b>The inbox isn't switched on for this site yet.</b></>}
+          iOS doesn't let web apps appear in the Share menu, so RAFAS uses a Shortcut that sends items to your personal
+          inbox. RAFAS adds them to your library the next time you open it. First, go to <Link to="/account">Account</Link> and
+          press <b>Create Shortcut token</b>. Copy the token; you'll paste it in step 4.
         </p>
         <p>Make two shortcuts, one for links and text and one for files:</p>
         <ol>
           <li>Open <b>Shortcuts</b> and tap <b>+</b>. Tap the shortcut's name at the top and call it <b>Send to RAFAS</b>.</li>
           <li>Tap the <b>ⓘ</b> (or settings) button and turn on <b>Show in Share Sheet</b>. Set it to receive <b>URLs</b>, <b>Text</b> and <b>Safari web pages</b>.</li>
           <li>Add the action <b>Get Contents of URL</b>. Set the URL to <code>{origin}/api/inbox</code>.</li>
-          <li>Tap the arrow to show more options. Method: <b>POST</b>. Add a header named <code>Authorization</code> with the value <code>Bearer YOUR-INBOX-TOKEN</code>.</li>
+          <li>Tap the arrow to show more options. Method: <b>POST</b>. Add a header named <code>Authorization</code> with the value <code>Bearer</code> followed by a space and your token.</li>
           <li>Request Body: <b>Form</b>. Add a <b>Text</b> field named <code>text</code> and set its value to <b>Shortcut Input</b>.</li>
           <li>Optionally add a <b>Show Notification</b> action saying "Sent to RAFAS".</li>
         </ol>
@@ -137,37 +190,38 @@ export default function Help({ inboxEmail, inboxEnabled, hasToken }) {
           For files, duplicate the shortcut and call it <b>Send file to RAFAS</b>. Set it to receive <b>Files</b> and
           <b> PDFs</b>, and in step 5 use a <b>File</b> field named <code>file</code> instead.
         </p>
-        <p>
-          To use the inbox on any device, enter the token in the <b>Inbox</b> panel on the <Link to="/">reader page</Link>.
-        </p>
       </section>
 
       <section id="email">
         <h2>Email documents in</h2>
         <p>
-          Send or forward an email to <code>{inboxEmail}</code> from an approved address. For safety, mail from any
-          other sender is turned away. The site owner manages the approved list.
+          Send or forward an email to <code>{inboxEmail}</code> from the address you sign in with. It goes into your
+          own library. Mail from addresses that don't belong to a RAFAS account is turned away.
         </p>
         <ul>
-          <li>PDF, EPUB, TXT, Markdown or HTML attachments each become a document.</li>
+          <li>PDF, EPUB, Word, TXT, Markdown or HTML attachments each become a document.</li>
           <li>An email that is just a link imports that article.</li>
           <li>Anything else is imported as the text of the email, with the subject as its title.</li>
         </ul>
-        <p>Emailed items show up the next time you open RAFAS on a device that has the inbox token saved.</p>
+        <p>Emailed items show up the next time you open RAFAS on any of your devices.</p>
       </section>
 
       <section id="trouble">
         <h2>Troubleshooting</h2>
+        <h3>The sign-in email doesn't arrive</h3>
+        <p>Check your spam or promotions folder for a message from RAFAS. Wait a minute, then use <b>Send a new code</b>. Only the newest few codes work.</p>
         <h3>An article won't import</h3>
         <p>Some sites block automated access or need a login. Copy the text from the page and paste it instead.</p>
         <h3>A PDF is slow, or the text looks wrong</h3>
         <p>Scanned PDFs go through text recognition, which takes a few seconds per page and isn't perfect on low-quality scans.</p>
         <h3>An EPUB says no readable text</h3>
         <p>Books bought from most stores are copy-protected (DRM) and can't be opened outside the store's own app.</p>
-        <h3>My library is empty</h3>
-        <p>Each browser keeps its own library. Check you're on the same device and browser, and not in a private window. Clearing site data also clears the library.</p>
-        <h3>Shared or emailed items don't appear</h3>
-        <p>Make sure the inbox token is saved on this device, then press <b>Check inbox</b> in the library. A link that can't be imported stays in the inbox and shows an error.</p>
+        <h3>A document is missing on another device</h3>
+        <p>Press <b>Sync</b> in the library. Documents added while offline upload the next time that device is online; they show "not synced" until then.</p>
+        <h3>A shared link says it isn't public</h3>
+        <p>In Google Drive, Dropbox or OneDrive, change sharing to "Anyone with the link", or use the Google Drive or Dropbox button instead.</p>
+        <h3>Emailed items don't appear</h3>
+        <p>Make sure you sent it from the email address you sign in with, then press <b>Sync</b>. A link that can't be imported stays in your inbox and shows an error.</p>
       </section>
 
       <p className="muted small">More about the name and how RSVP works: <Link to="/about">About RAFAS</Link>.</p>

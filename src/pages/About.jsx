@@ -3,7 +3,7 @@ import { Link } from "../router.jsx";
 
 const DEMO = "Your eyes stay still and the words come to you.".split(" ");
 
-function DemoReader() {
+export function DemoReader() {
   const [i, setI] = useState(0);
   useEffect(() => {
     const t = setTimeout(() => setI((n) => (n + 1) % DEMO.length), i === DEMO.length - 1 ? 1200 : 300);
@@ -44,10 +44,11 @@ export default function About() {
       <h2>What RAFAS does</h2>
       <ul>
         <li>Reads web articles, PDFs (including scanned ones, using text recognition), EPUB books, text files and pasted text.</li>
-        <li>Keeps a library of everything you open and remembers your place in each one.</li>
+        <li>Reads Word documents, and files from Google Drive, Dropbox and iCloud Drive.</li>
+        <li>Gives everyone their own library that remembers your place in each document, on every device you sign in on.</li>
         <li>Works on phones and computers, and can be installed as an app.</li>
         <li>Lets you share documents straight from your phone, or email them in.</li>
-        <li>Keeps your documents on your own device. See <Link to="/privacy">Privacy</Link>.</li>
+        <li>Has no ads and no tracking. See <Link to="/privacy">Privacy</Link>.</li>
       </ul>
 
       <p>New here? The <Link to="/help">Help page</Link> covers everything, or just <Link to="/">start reading</Link>.</p>

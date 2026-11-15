@@ -1,22 +1,36 @@
-// Document library stored in IndexedDB. Metadata and full text live in
-// separate stores so the library list stays fast even with large books.
-const DB_NAME = "rsvp-reader";
+// Local copy of the signed-in person's library, in IndexedDB. Each account gets
+// its own database so family members sharing a tablet don't see each other's
+// books. The server copy (see sync.js) is the source of truth across devices.
 const DB_VERSION = 1;
 
-let dbPromise;
+let dbName = null;
+let dbPromise = null;
+
+function openNamed(name, upgrade) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, DB_VERSION);
+    request.onupgradeneeded = () => upgrade(request.result);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function upgradeLibrary(db) {
+  if (!db.objectStoreNames.contains("docs")) db.createObjectStore("docs", { keyPath: "id" });
+  if (!db.objectStoreNames.contains("texts")) db.createObjectStore("texts");
+}
+
+export function setLibraryOwner(userId) {
+  const name = userId ? `rafas-${userId}` : null;
+  if (name === dbName) return;
+  dbPromise?.then((db) => db.close()).catch(() => {});
+  dbName = name;
+  dbPromise = null;
+}
+
 function openDb() {
-  if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains("docs")) db.createObjectStore("docs", { keyPath: "id" });
-        if (!db.objectStoreNames.contains("texts")) db.createObjectStore("texts");
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
+  if (!dbName) return Promise.reject(new Error("Not signed in"));
+  if (!dbPromise) dbPromise = openNamed(dbName, upgradeLibrary);
   return dbPromise;
 }
 
@@ -35,13 +49,22 @@ function req(request) {
   });
 }
 
-function newId() {
-  return (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+export function newId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+// Includes documents marked deleted (waiting to be removed from the server).
+export async function allDocs() {
+  const db = await openDb();
+  return await req(db.transaction("docs").objectStore("docs").getAll());
 }
 
 export async function listDocs() {
-  const db = await openDb();
-  const docs = await req(db.transaction("docs").objectStore("docs").getAll());
+  const docs = (await allDocs()).filter((d) => !d.deleted);
   return docs.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0));
 }
 
@@ -52,23 +75,30 @@ export async function getDoc(id) {
 
 export async function getText(id) {
   const db = await openDb();
-  return (await req(db.transaction("texts").objectStore("texts").get(id))) || "";
+  return await req(db.transaction("texts").objectStore("texts").get(id));
+}
+
+export async function putDoc(doc, text) {
+  const db = await openDb();
+  const tx = db.transaction(["docs", "texts"], "readwrite");
+  tx.objectStore("docs").put(doc);
+  if (typeof text === "string") tx.objectStore("texts").put(text, doc.id);
+  await done(tx);
+  return doc;
 }
 
 // Adds a document, or returns the existing one if the same text was saved before
 // (so sharing the same article twice resumes it instead of duplicating it).
 export async function addDoc({ title, text, source = "paste", sourceUrl = "", wordCount }) {
   const existing = (await listDocs()).find((d) => d.title === title && d.wordCount === wordCount && d.chars === text.length);
-  if (existing) return await touchDoc(existing.id);
-
+  if (existing) return await updateDoc(existing.id, { lastOpenedAt: Date.now() });
   const now = Date.now();
-  const doc = { id: newId(), title, source, sourceUrl, wordCount, chars: text.length, wordIndex: 0, createdAt: now, updatedAt: now, lastOpenedAt: now };
-  const db = await openDb();
-  const tx = db.transaction(["docs", "texts"], "readwrite");
-  tx.objectStore("docs").put(doc);
-  tx.objectStore("texts").put(text, doc.id);
-  await done(tx);
-  return doc;
+  return await putDoc({
+    id: newId(), title, source, sourceUrl, wordCount, chars: text.length,
+    wordIndex: 0, readWords: 0, positionAt: now, serverPositionAt: 0,
+    createdAt: now, updatedAt: now, lastOpenedAt: now,
+    textVersion: 1, synced: false, textMissing: false
+  }, text);
 }
 
 export async function updateDoc(id, changes, text) {
@@ -76,7 +106,7 @@ export async function updateDoc(id, changes, text) {
   const tx = db.transaction(["docs", "texts"], "readwrite");
   const store = tx.objectStore("docs");
   const doc = await req(store.get(id));
-  if (!doc) return null;
+  if (!doc) { tx.abort(); return null; }
   const next = { ...doc, ...changes, updatedAt: Date.now() };
   store.put(next);
   if (typeof text === "string") tx.objectStore("texts").put(text, id);
@@ -84,11 +114,7 @@ export async function updateDoc(id, changes, text) {
   return next;
 }
 
-export async function touchDoc(id) {
-  return await updateDoc(id, { lastOpenedAt: Date.now() });
-}
-
-export async function deleteDoc(id) {
+export async function removeDoc(id) {
   const db = await openDb();
   const tx = db.transaction(["docs", "texts"], "readwrite");
   tx.objectStore("docs").delete(id);
@@ -96,15 +122,28 @@ export async function deleteDoc(id) {
   await done(tx);
 }
 
+// Documents saved before accounts existed lived in a shared "rsvp-reader"
+// database. Hand them over once, to the first person who signs in here.
+export async function takeLegacyDocs() {
+  if (!indexedDB.databases) return [];
+  const names = (await indexedDB.databases()).map((d) => d.name);
+  if (!names.includes("rsvp-reader")) return [];
+  const db = await openNamed("rsvp-reader", upgradeLibrary);
+  const docs = await req(db.transaction("docs").objectStore("docs").getAll());
+  const out = [];
+  for (const doc of docs) {
+    const text = await req(db.transaction("texts").objectStore("texts").get(doc.id));
+    if (text) out.push({ doc, text });
+  }
+  db.close();
+  await new Promise((resolve) => { const r = indexedDB.deleteDatabase("rsvp-reader"); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
+  return out;
+}
+
 // Items the service worker received from the OS share sheet, waiting to be imported.
 const SHARE_DB = "rsvp-share";
 function openShareDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(SHARE_DB, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore("pending", { keyPath: "id", autoIncrement: true });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+  return openNamed(SHARE_DB, (db) => db.createObjectStore("pending", { keyPath: "id", autoIncrement: true }));
 }
 
 export async function listPendingShares() {

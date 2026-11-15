@@ -130,15 +130,44 @@ async function readEpub(buffer, setStatus) {
   return { text: joined, title: bookTitle };
 }
 
+const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+// Word documents are zip files; the body text is in word/document.xml.
+async function readDocx(buffer, setStatus) {
+  setStatus("Reading Word document...");
+  const { default: JSZip } = await import("jszip");
+  const zip = await JSZip.loadAsync(buffer);
+  const entry = zip.file("word/document.xml");
+  if (!entry) throw new Error("That doesn't look like a Word (.docx) file.");
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(await entry.async("text"), "application/xml");
+  const paragraphs = [];
+  for (const p of Array.from(doc.getElementsByTagNameNS(W_NS, "p"))) {
+    let line = "";
+    const walker = doc.createTreeWalker(p, NodeFilter.SHOW_ELEMENT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.namespaceURI !== W_NS) continue;
+      if (node.localName === "t") line += node.textContent;
+      else if (node.localName === "tab" || node.localName === "br") line += " ";
+    }
+    if (line.trim()) paragraphs.push(line);
+  }
+  let title = "";
+  const core = zip.file("docProps/core.xml");
+  if (core) title = normalizeText(parser.parseFromString(await core.async("text"), "application/xml").getElementsByTagNameNS("*", "title")[0]?.textContent || "");
+  return { text: paragraphs.join(" "), title };
+}
+
 function fileKind(name, type) {
   const lower = String(name || "").toLowerCase();
   if (lower.endsWith(".pdf") || type === "application/pdf") return "pdf";
   if (lower.endsWith(".epub") || type === "application/epub+zip") return "epub";
+  if (lower.endsWith(".docx") || type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return "docx";
   if (/\.html?$/.test(lower) || type === "text/html") return "html";
   return "text";
 }
 
-export const ACCEPTED_FILES = ".txt,.md,.csv,.html,.htm,.pdf,.epub,text/plain,text/markdown,text/html,application/pdf,application/epub+zip";
+export const ACCEPTED_FILES = ".txt,.md,.csv,.html,.htm,.pdf,.epub,.docx,text/plain,text/markdown,text/html,application/pdf,application/epub+zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 // Accepts a File or Blob (with optional name) and returns { text, title }.
 export async function readDocumentFile(file, setStatus, name = file.name) {
@@ -148,6 +177,11 @@ export async function readDocumentFile(file, setStatus, name = file.name) {
   if (kind === "pdf") return { text: await readPdf(await file.arrayBuffer(), setStatus), title: baseTitle };
   if (kind === "epub") {
     const result = await readEpub(await file.arrayBuffer(), setStatus);
+    return { text: result.text, title: result.title || baseTitle };
+  }
+  if (kind === "docx") {
+    const result = await readDocx(await file.arrayBuffer(), setStatus);
+    if (!normalizeText(result.text)) throw new Error("No text found in that Word document.");
     return { text: result.text, title: result.title || baseTitle };
   }
   if (kind === "html") return { text: stripHtml(await file.text()), title: baseTitle };
