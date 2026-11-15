@@ -23,12 +23,6 @@
 			"database_name": "rafas",
 			"database_id": "bc539c73-5cd6-45dc-aa9d-1bfdd6a4f1a6",
 			"migrations_dir": "migrations"
-		},
-		{
-			"binding": "rafas",
-			"database_name": "rafas",
-			"database_id": "bc539c73-5cd6-45dc-aa9d-1bfdd6a4f1a6",
-			"remote": true
 		}
 	],
 	// Create with: npx wrangler kv namespace create INBOX  (then paste the id here)
@@ -36,11 +30,6 @@
 		{
 			"binding": "INBOX",
 			"id": "adb0678a573f4367821e1eaff75208c1"
-		},
-		{
-			"binding": "rafas_inbox",
-			"id": "adb0678a573f4367821e1eaff75208c1",
-			"remote": true
 		}
 	],
 	"vars": {
@@ -53,7 +42,10 @@
 		"GOOGLE_CLIENT_ID": "",
 		"GOOGLE_API_KEY": "",
 		"GOOGLE_APP_ID": "",
-		"DROPBOX_APP_KEY": ""
+		"DROPBOX_APP_KEY": "",
+		// iCloud link to your shared "Send to RAFAS" shortcut (with an import question for the token).
+		// Leave empty to hide the one-tap iPhone setup on the Account page.
+		"SHORTCUT_URL": ""
 	},
 	// Secrets (not stored in this file):
 	//   npx wrangler secret put RESEND_API_KEY   from resend.com, for sign-in emails

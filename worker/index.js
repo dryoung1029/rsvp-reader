@@ -18,13 +18,47 @@ function config(env) {
     google: env.GOOGLE_CLIENT_ID && env.GOOGLE_API_KEY
       ? { clientId: env.GOOGLE_CLIENT_ID, apiKey: env.GOOGLE_API_KEY, appId: env.GOOGLE_APP_ID || "" }
       : null,
-    dropbox: env.DROPBOX_APP_KEY ? { appKey: env.DROPBOX_APP_KEY } : null
+    dropbox: env.DROPBOX_APP_KEY ? { appKey: env.DROPBOX_APP_KEY } : null,
+    shortcutUrl: /^https:\/\/(www\.)?icloud\.com\/shortcuts\//.test(env.SHORTCUT_URL || "") ? env.SHORTCUT_URL : ""
   };
+}
+
+// vCard lines over 75 characters are folded with CRLF + space.
+function foldVcard(line) {
+  const out = [];
+  for (let i = 0; i < line.length; i += 74) out.push((i ? " " : "") + line.slice(i, i + 74));
+  return out.join("\r\n");
+}
+
+// A contact card for the inbox address, so "Share → Mail → RAFAS" just works.
+async function contactCard(request, env, url) {
+  const email = env.INBOX_EMAIL || "";
+  if (!email) throw new HttpError(404, "Email inbox isn't set up.");
+  let photo = "";
+  try {
+    const icon = await env.ASSETS.fetch(new Request(new URL("/icon-192.png", url)));
+    if (icon.ok) {
+      const bytes = new Uint8Array(await icon.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      photo = `PHOTO;ENCODING=b;TYPE=PNG:${btoa(bin)}`;
+    }
+  } catch { /* card works without a photo */ }
+  const lines = [
+    "BEGIN:VCARD", "VERSION:3.0", "N:;RAFAS;;;", "FN:RAFAS", "ORG:RAFAS",
+    `EMAIL;TYPE=INTERNET:${email}`, `URL:${env.APP_URL || url.origin}`,
+    "NOTE:Send articles\\, PDFs and books here from your own email address to add them to your RAFAS library.",
+    photo, "END:VCARD"
+  ].filter(Boolean).map(foldVcard);
+  return new Response(`${lines.join("\r\n")}\r\n`, {
+    headers: { "content-type": "text/vcard; charset=utf-8", "content-disposition": 'inline; filename="RAFAS.vcf"', "cache-control": "public, max-age=3600" }
+  });
 }
 
 async function handleApi(request, env, url) {
   const { pathname } = url;
   if (pathname === "/api/config" && request.method === "GET") return json(config(env));
+  if (pathname === "/api/contact.vcf" && request.method === "GET") return contactCard(request, env, url);
   if (!env.DB) throw new HttpError(503, "The database isn't set up. See the README.");
 
   for (const handler of [handleAuth, handleDocs, handleGame, handleStats, handleInbox, handleImporter]) {

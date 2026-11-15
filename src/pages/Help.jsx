@@ -262,11 +262,29 @@ export default function Help({ inboxEmail, signedIn }) {
           page, selected text, or a PDF/EPUB file and it opens in RAFAS, saved to your library. Nothing else to set up.
         </p>
 
-        <h3>iPhone and iPad</h3>
+        <h3>iPhone and iPad: the easy way (email)</h3>
         <p>
-          iOS doesn't let web apps appear in the Share menu, so RAFAS uses a Shortcut that sends items to your personal
-          inbox. RAFAS adds them to your library the next time you open it. First, go to <Link to="/account">Account</Link> and
-          press <b>Create Shortcut token</b>. Copy the token; you'll paste it in step 4.
+          On your <Link to="/account">Account</Link> page, tap <b>Add RAFAS to Contacts</b> and save the contact. After
+          that, on any web page, PDF or file: tap Share → Mail → To: <b>RAFAS</b> → Send. Send it from the email address you
+          sign in with. It's added to your library the next time you open RAFAS. Nothing else to set up.
+        </p>
+
+        <h3>iPhone and iPad: a RAFAS button in the Share menu</h3>
+        <p>
+          iOS doesn't let web apps appear in the Share menu, so this uses a Shortcut. If the Account page shows
+          <b> Set up the Share button</b>, it's quick:
+        </p>
+        <ol>
+          <li>Tap <b>Set up the Share button</b>. Your personal token is copied.</li>
+          <li>Tap <b>Get the Shortcut</b>, then <b>Add Shortcut</b>.</li>
+          <li>When it asks for your token, paste it.</li>
+        </ol>
+        <p>From then on, RAFAS (or "Send to RAFAS") appears when you tap Share.</p>
+
+        <h3>Building the Shortcut yourself</h3>
+        <p>
+          If there's no Set up button, build it once by hand. On your <Link to="/account">Account</Link> page, press
+          <b> Create Shortcut token</b> and copy the token; you'll paste it in step 4.
         </p>
         <p>Make two shortcuts, one for links and text and one for files:</p>
         <ol>

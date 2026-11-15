@@ -120,6 +120,18 @@ To deploy automatically on every push instead, connect this GitHub repo under Wo
 
 Mail is accepted only from the email address of a RAFAS account, and goes into that person's inbox. If you pick a different address, change `INBOX_EMAIL` in `wrangler.jsonc`.
 
+### One-tap iPhone setup (optional)
+
+Family members can always use email: the Account page has an **Add RAFAS to Contacts** button (a contact card for `INBOX_EMAIL`), after which Share → Mail → RAFAS sends anything to their library.
+
+For a RAFAS button in the iPhone Share menu, build the Shortcut once and share it:
+
+1. Build "Send to RAFAS" as described on the Help page (Get Contents of URL → `https://rafas.app/api/inbox`, POST, header `Authorization: Bearer <token>`, form field `text` or `file` = Shortcut Input).
+2. In the shortcut's settings, open the **Setup** tab and add an **import question** on the `Authorization` header value, e.g. "Paste your RAFAS token". Change that value to just `Bearer ` plus the token, so the question replaces your token when someone else installs it. Your token is not shared.
+3. Share → **Copy iCloud Link**, and put the link in `SHORTCUT_URL` in `wrangler.jsonc`, then deploy.
+
+The Account page then shows **Set up the Share button**: it creates the person's token, copies it, and links to the Shortcut. If you edit the Shortcut later, copy a new iCloud link; old links keep the old version.
+
 ### Google Drive picker (optional)
 
 1. In [Google Cloud Console](https://console.cloud.google.com), create a project and enable the **Google Drive API** and **Google Picker API**.

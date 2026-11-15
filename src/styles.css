@@ -449,3 +449,6 @@ table.leader td { vertical-align: middle; }
 .nav { flex-shrink: 1; min-width: 0; }
 .page .ranking, .page .history, .page .feed { padding-left: 0; }
 .page .ranking li, .page .history li, .page .feed li { margin: 0; }
+.setup-step { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; align-items: start; }
+.setup-step p { margin: 0 0 8px; }
+.setup-num { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 900; background: var(--accent-soft); color: var(--accent); }
