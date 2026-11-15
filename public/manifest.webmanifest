@@ -1,0 +1,31 @@
+{
+  "name": "RSVP Reader",
+  "short_name": "RSVP",
+  "description": "Speed-read articles, PDFs and EPUBs one word at a time.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "file",
+          "accept": ["application/pdf", ".pdf", "application/epub+zip", ".epub", "text/plain", ".txt", "text/markdown", ".md", "text/html", ".html", "text/csv", ".csv"]
+        }
+      ]
+    }
+  }
+}
