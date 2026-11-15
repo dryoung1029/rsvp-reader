@@ -1,6 +1,6 @@
-// RSVP Reader service worker: receives items from the OS share sheet
+// RAFAS service worker: receives items from the OS share sheet
 // (Web Share Target) and keeps the app shell available offline.
-const CACHE = "rsvp-shell-v1";
+const CACHE = "rafas-shell-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {

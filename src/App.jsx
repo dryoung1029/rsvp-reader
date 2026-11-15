@@ -8,10 +8,16 @@ import {
   listDocs, getDoc, getText, addDoc, updateDoc, touchDoc, deleteDoc,
   listPendingShares, deletePendingShare
 } from "./lib/library.js";
+import { Link, navigate, usePath } from "./router.jsx";
+import { APP_NAME, APP_LONG_NAME, DEFAULT_INBOX_EMAIL } from "./config.js";
+import About from "./pages/About.jsx";
+import Help from "./pages/Help.jsx";
+import Privacy from "./pages/Privacy.jsx";
 
-const SAMPLE_TEXT = `Rapid Serial Visual Presentation, or RSVP, shows text one word or short phrase at a time in the same location. Paste text, import a URL, drag in a PDF, or load an EPUB. Everything you open is saved to your library with your place in it, so you can come back later and pick up where you left off.`;
+const SAMPLE_TEXT = `Welcome to RAFAS. Words appear one at a time in the same spot, so your eyes can stay still. The red letter is the pivot: rest your eyes on it. Tap the middle to pause, or tap the left or right edge to jump back or forward a sentence. Add an article, a PDF, an EPUB or some pasted text, and RAFAS will save it to your library and remember your place.`;
 
-const SOURCE_LABEL = { paste: "Pasted", url: "Web", file: "File", share: "Shared", inbox: "Inbox", email: "Email" };
+const SOURCE_LABEL = { paste: "Pasted", url: "Web", file: "File", share: "Shared", inbox: "Inbox" };
+const PAGE_TITLES = { "/": APP_NAME, "/about": `About · ${APP_NAME}`, "/help": `Help · ${APP_NAME}`, "/privacy": `Privacy · ${APP_NAME}` };
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -36,6 +42,19 @@ function sharedUrl({ url, text }) {
   return link && getWords(text).length <= 40 ? link : "";
 }
 
+const SENTENCE_END = /[.!?…]["'”’)\]]*$/;
+function prevSentenceStart(chunks, i) {
+  let j = i - 1;
+  if (j >= 0 && SENTENCE_END.test(chunks[j])) j -= 1; // already at a sentence start: go to the previous one
+  while (j >= 0 && !SENTENCE_END.test(chunks[j])) j -= 1;
+  return Math.max(0, j + 1);
+}
+function nextSentenceStart(chunks, i) {
+  let j = i;
+  while (j < chunks.length - 1 && !SENTENCE_END.test(chunks[j])) j += 1;
+  return Math.min(j + 1, Math.max(0, chunks.length - 1));
+}
+
 async function extractArticle(url) {
   const response = await fetch("/api/extract", {
     method: "POST",
@@ -48,11 +67,17 @@ async function extractArticle(url) {
   return { text: clean, title: data.title || url };
 }
 
+function initialTheme() {
+  const saved = store.get("rsvp:theme") || (store.get("rsvp:dark") === "false" ? "light" : null);
+  if (saved) return saved;
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
 function PivotWord({ text, enabled }) {
-  if (!text) return <span>Drag a PDF or EPUB here</span>;
+  if (!text) return <span>Add something to read</span>;
   if (!enabled || text.includes(" ")) return <span>{text}</span>;
 
-  const marks = ".,!?;:()[]{}\"'“”‘’";
+  const marks = ".,!?;:()[]{}\"'“”‘’…";
   let start = 0;
   let end = text.length - 1;
   while (start < text.length && marks.includes(text[start])) start += 1;
@@ -64,19 +89,40 @@ function PivotWord({ text, enabled }) {
   const pivot = pivotIndex(core);
 
   return (
-    <span style={{ display: "inline-grid", gridTemplateColumns: "1fr auto 1fr", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-      <span style={{ textAlign: "right" }}>{lead}{core.slice(0, pivot)}</span>
-      <span style={{ color: "#ef4444" }}>{core[pivot] || ""}</span>
-      <span style={{ textAlign: "left" }}>{core.slice(pivot + 1)}{trail}</span>
+    <span className="pivot-word">
+      <span>{lead}{core.slice(0, pivot)}</span>
+      <span className="pivot">{core[pivot] || ""}</span>
+      <span>{core.slice(pivot + 1)}{trail}</span>
     </span>
   );
 }
 
+// The word display with tap zones: left = previous sentence, middle = play/pause, right = next sentence.
+function Stage({ current, playing, fontSize, pivot, chunkSize, focusLine, dragging, onBack, onToggle, onNext, fill }) {
+  return (
+    <div className={`stage${dragging ? " drop" : ""}${playing ? "" : " paused"}`}>
+      {focusLine && !dragging && <div className="guide" />}
+      <div className="word" style={{ fontSize: fill ? `clamp(40px, 12vw, ${Math.round(fontSize * 1.4)}px)` : `clamp(38px, 12vw, ${fontSize}px)` }}>
+        {dragging ? "Drop file to add it" : <PivotWord text={current} enabled={pivot && chunkSize === 1} />}
+      </div>
+      {!dragging && (
+        <div className="zones">
+          <button className="side" aria-label="Previous sentence" onClick={onBack}>‹</button>
+          <button aria-label={playing ? "Pause" : "Play"} onClick={onToggle} />
+          <button className="side" aria-label="Next sentence" onClick={onNext}>›</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
+  const path = usePath();
+
   const [docs, setDocs] = useState([]);
   const [docId, setDocId] = useState(null);
   const [text, setText] = useState(SAMPLE_TEXT);
-  const [title, setTitle] = useState("Sample text");
+  const [title, setTitle] = useState("Welcome");
   const [index, setIndex] = useState(0);
   const [ready, setReady] = useState(false);
 
@@ -85,26 +131,27 @@ export default function App() {
   const [status, setStatus] = useState("");
   const [libraryQuery, setLibraryQuery] = useState("");
 
-  const [wpm, setWpm] = useState(() => Number(store.get("rsvp:wpm")) || 325);
+  const [wpm, setWpm] = useState(() => Number(store.get("rsvp:wpm")) || 300);
   const [chunkSize, setChunkSize] = useState(() => Number(store.get("rsvp:chunkSize")) || 1);
-  const [fontSize, setFontSize] = useState(() => Number(store.get("rsvp:fontSize")) || 62);
-  const [dark, setDark] = useState(() => store.get("rsvp:dark") !== "false");
+  const [fontSize, setFontSize] = useState(() => Number(store.get("rsvp:fontSize")) || 64);
+  const [theme, setTheme] = useState(initialTheme);
   const [pivot, setPivot] = useState(() => store.get("rsvp:pivot") !== "false");
   const [focusLine, setFocusLine] = useState(() => store.get("rsvp:focusLine") === "true");
   const [playing, setPlaying] = useState(false);
+  const [focus, setFocus] = useState(false);
   const [showText, setShowText] = useState(false);
   const [dragging, setDragging] = useState(false);
 
   const [inboxToken, setInboxToken] = useState(() => store.get("rsvp:inboxToken") || "");
   const [tokenDraft, setTokenDraft] = useState(() => store.get("rsvp:inboxToken") || "");
-  const [serverInbox, setServerInbox] = useState(null);
+  const [server, setServer] = useState({ inbox: null, email: "" });
 
   const words = useMemo(() => getWords(text), [text]);
   const chunks = useMemo(() => makeChunks(words, chunkSize), [words, chunkSize]);
   const maxIndex = Math.max(0, chunks.length - 1);
   const current = chunks[index] || "";
   const progress = chunks.length ? Math.round(((index + 1) / chunks.length) * 100) : 0;
-  const minutesLeft = ((words.length - index * chunkSize) / wpm);
+  const minutesLeft = (words.length - index * chunkSize) / wpm;
 
   const libraryRef = useRef(null);
   const syncingRef = useRef(false);
@@ -113,10 +160,19 @@ export default function App() {
   useEffect(() => { store.set("rsvp:wpm", String(wpm)); }, [wpm]);
   useEffect(() => { store.set("rsvp:chunkSize", String(chunkSize)); }, [chunkSize]);
   useEffect(() => { store.set("rsvp:fontSize", String(fontSize)); }, [fontSize]);
-  useEffect(() => { store.set("rsvp:dark", String(dark)); }, [dark]);
   useEffect(() => { store.set("rsvp:pivot", String(pivot)); }, [pivot]);
   useEffect(() => { store.set("rsvp:focusLine", String(focusLine)); }, [focusLine]);
   useEffect(() => { if (docId) store.set("rsvp:currentDoc", docId); }, [docId]);
+  useEffect(() => {
+    store.set("rsvp:theme", theme);
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#020617" : "#f8fafc");
+  }, [theme]);
+
+  useEffect(() => {
+    document.title = PAGE_TITLES[path] || APP_NAME;
+    if (path !== "/") { setPlaying(false); setFocus(false); }
+  }, [path]);
 
   // ---------- Reading position persistence ----------
   // Positions are stored as a word offset so changing "words per flash" keeps your place.
@@ -175,18 +231,19 @@ export default function App() {
     if (!quiet) {
       setStatus(meta.wordIndex ? `Resumed "${meta.title}" at ${docProgress(meta)}%.` : `Opened "${meta.title}".`);
     }
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (window.location.pathname !== "/") navigate("/");
+    else window.scrollTo({ top: 0, behavior: "smooth" });
   }, [chunkSize, flushPosition, refreshDocs]);
 
   const saveAndOpen = useCallback(async ({ text: raw, title: newTitle, source, sourceUrl }) => {
     const clean = normalizeText(raw);
-    if (!clean) throw new Error("No readable text found. The file may be DRM-protected or image-only.");
+    if (!clean) throw new Error("No readable text found. The file may be copy-protected or image-only.");
     const doc = await addDoc({ title: newTitle || titleFromText(clean), text: clean, source, sourceUrl, wordCount: clean.split(" ").length });
     await openDoc(doc.id, { quiet: true });
     return doc;
   }, [openDoc]);
 
-  // Turns any incoming item (share sheet, inbox, email) into a library document.
+  // Turns any incoming item (share sheet or inbox) into a library document.
   const importItem = useCallback(async (item, source) => {
     if (item.kind === "file") {
       const parsed = await readDocumentFile(item.blob, setStatus, item.name);
@@ -206,26 +263,24 @@ export default function App() {
     return await saveAndOpen({ text: item.text, title: item.title, source });
   }, [saveAndOpen]);
 
-  // Items handed to us by the service worker from the Android share sheet.
+  // Items handed over by the service worker from the Android share sheet.
   const importPendingShares = useCallback(async () => {
     const pending = await listPendingShares().catch(() => []);
-    let imported = 0;
     for (const item of pending) {
       try {
         await importItem(item, "share");
-        imported += 1;
+        setStatus("Saved the shared item to your library.");
       } catch (error) {
-        setStatus(`Could not read shared item: ${error.message}`);
+        setStatus(`Could not read the shared item: ${error.message}`);
       }
       await deletePendingShare(item.id);
     }
     if (new URLSearchParams(window.location.search).has("shared")) {
       window.history.replaceState(null, "", window.location.pathname);
     }
-    return imported;
   }, [importItem]);
 
-  // Items sent to the server inbox (iOS Shortcut, email, or any HTTP client).
+  // Items sent to the server inbox (iPhone Shortcut, email, or any HTTP client).
   const syncInbox = useCallback(async ({ quiet = false } = {}) => {
     if (!inboxToken || syncingRef.current) return 0;
     syncingRef.current = true;
@@ -238,12 +293,11 @@ export default function App() {
       if (!response.ok) throw new Error(data.error || `Inbox returned ${response.status}`);
       for (const item of data.items || []) {
         try {
-          let entry = item;
-          if (item.kind === "file") {
-            const fileResponse = await fetch(`/api/inbox/${item.id}/file`, { headers });
-            if (!fileResponse.ok) throw new Error("Could not download file");
-            entry = { ...item, blob: await fileResponse.blob() };
-          }
+          const bodyResponse = await fetch(`/api/inbox/${item.id}`, { headers });
+          if (!bodyResponse.ok) throw new Error("Could not download it");
+          const entry = item.kind === "file"
+            ? { ...item, blob: await bodyResponse.blob() }
+            : { ...item, ...(await bodyResponse.json()) };
           await importItem(entry, "inbox");
           imported += 1;
           await fetch(`/api/inbox/${item.id}`, { method: "DELETE", headers });
@@ -251,7 +305,7 @@ export default function App() {
           setStatus(`Could not import "${item.title || item.name || "inbox item"}": ${error.message}`);
         }
       }
-      if (imported) setStatus(`Imported ${imported} item${imported === 1 ? "" : "s"} from your inbox.`);
+      if (imported) setStatus(`Added ${imported} item${imported === 1 ? "" : "s"} from your inbox.`);
       else if (!quiet) setStatus("Inbox is empty.");
     } catch (error) {
       if (!quiet) setStatus(`Inbox: ${error.message}`);
@@ -267,14 +321,14 @@ export default function App() {
     (async () => {
       try {
         const legacyText = store.get("rsvp:text");
-        if (legacyText && normalizeText(legacyText) !== normalizeText(SAMPLE_TEXT)) {
+        if (legacyText && !legacyText.startsWith("Rapid Serial Visual Presentation, or RSVP")) {
           const clean = normalizeText(legacyText);
           const doc = await addDoc({ title: store.get("rsvp:title") || titleFromText(clean), text: clean, source: "paste", wordCount: clean.split(" ").length });
           const wordIndex = (Number(store.get("rsvp:index")) || 0) * (Number(store.get("rsvp:chunkSize")) || 1);
           await updateDoc(doc.id, { wordIndex, readWords: wordIndex });
           store.set("rsvp:currentDoc", doc.id);
         }
-        ["rsvp:text", "rsvp:title", "rsvp:index"].forEach(store.remove);
+        ["rsvp:text", "rsvp:title", "rsvp:index", "rsvp:dark"].forEach(store.remove);
 
         const list = await refreshDocs();
         const lastId = store.get("rsvp:currentDoc");
@@ -282,7 +336,7 @@ export default function App() {
         if (target && !cancelled) await openDoc(target.id, { quiet: true });
       } catch (error) {
         console.error(error);
-        setStatus("Saved library is unavailable in this browser (private mode?). Documents won't be kept.");
+        setStatus("Your library isn't available in this browser (private window?). Documents won't be kept.");
       }
       if (cancelled) return;
       setReady(true);
@@ -293,7 +347,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/status").then((r) => r.json()).then((d) => setServerInbox(Boolean(d.inbox))).catch(() => setServerInbox(false));
+    fetch("/api/status").then((r) => r.json()).then((d) => setServer({ inbox: Boolean(d.inbox), email: d.email || "" })).catch(() => setServer({ inbox: false, email: "" }));
   }, []);
 
   // Pull from the inbox on launch and whenever the app comes back to the foreground.
@@ -320,7 +374,7 @@ export default function App() {
 
   useEffect(() => { if (!playing) flushPosition(); }, [playing, flushPosition]);
 
-  // Keep the phone screen awake while words are flashing.
+  // Keep the screen awake while words are flashing.
   useEffect(() => {
     if (!playing || !navigator.wakeLock) return;
     let lock;
@@ -328,18 +382,54 @@ export default function App() {
     return () => { lock?.release().catch(() => {}); };
   }, [playing]);
 
+  const togglePlay = useCallback(() => {
+    if (!playing && index >= maxIndex && maxIndex > 0) setIndex(0); // pressing play at the end starts over
+    setPlaying(!playing);
+  }, [playing, index, maxIndex]);
+  const backSentence = useCallback(() => setIndex((i) => prevSentenceStart(chunks, i)), [chunks]);
+  const nextSentence = useCallback(() => setIndex((i) => nextSentenceStart(chunks, i)), [chunks]);
+
+  // ---------- Focus mode ----------
+  const wentFullscreen = useRef(false);
+  const enterFocus = useCallback(() => {
+    setFocus(true);
+    const el = document.documentElement;
+    if (el.requestFullscreen && !document.fullscreenElement) {
+      el.requestFullscreen().then(() => { wentFullscreen.current = true; }).catch(() => {});
+    }
+  }, []);
+  const exitFocus = useCallback(() => {
+    setFocus(false);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    wentFullscreen.current = false;
+  }, []);
   useEffect(() => {
+    const onChange = () => {
+      if (!document.fullscreenElement && wentFullscreen.current) { wentFullscreen.current = false; setFocus(false); }
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // ---------- Keyboard ----------
+  useEffect(() => {
+    if (path !== "/") return undefined;
     function onKeyDown(event) {
       const tag = event.target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON") return;
-      if (event.code === "Space") { event.preventDefault(); setPlaying((p) => !p); }
-      if (event.key === "ArrowLeft") setIndex((i) => clamp(i - 1, 0, maxIndex));
-      if (event.key === "ArrowRight") setIndex((i) => clamp(i + 1, 0, maxIndex));
-      if (event.key === "r" || event.key === "R") { setPlaying(false); setIndex(0); }
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = event.key;
+      if (event.code === "Space") { event.preventDefault(); togglePlay(); }
+      else if (key === "ArrowLeft") { event.preventDefault(); event.shiftKey ? backSentence() : setIndex((i) => clamp(i - 1, 0, maxIndex)); }
+      else if (key === "ArrowRight") { event.preventDefault(); event.shiftKey ? nextSentence() : setIndex((i) => clamp(i + 1, 0, maxIndex)); }
+      else if (key === "ArrowUp") { event.preventDefault(); setWpm((w) => clamp(w + 25, 100, 1000)); }
+      else if (key === "ArrowDown") { event.preventDefault(); setWpm((w) => clamp(w - 25, 100, 1000)); }
+      else if (key === "f" || key === "F") { focus ? exitFocus() : enterFocus(); }
+      else if (key === "Escape" && focus) exitFocus();
+      else if (key === "r" || key === "R") { setPlaying(false); setIndex(0); }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [maxIndex]);
+  }, [path, maxIndex, focus, togglePlay, backSentence, nextSentence, enterFocus, exitFocus]);
 
   function changeChunkSize(next) {
     const wordIndex = index * chunkSize;
@@ -364,11 +454,12 @@ export default function App() {
   async function importUrl(value = url) {
     const trimmed = value.trim();
     if (!trimmed) return;
+    const target = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
     setStatus("Importing article...");
     setPlaying(false);
     try {
-      const article = await extractArticle(trimmed);
-      await saveAndOpen({ text: article.text, title: article.title, source: "url", sourceUrl: trimmed });
+      const article = await extractArticle(target);
+      await saveAndOpen({ text: article.text, title: article.title, source: "url", sourceUrl: target });
       setUrl("");
       setStatus(`Saved "${article.title}" to your library.`);
     } catch (error) {
@@ -393,10 +484,10 @@ export default function App() {
   async function pasteFromClipboard() {
     try {
       const clip = await navigator.clipboard.readText();
-      if (!clip.trim()) { setStatus("Clipboard is empty."); return; }
+      if (!clip.trim()) { setStatus("The clipboard is empty."); return; }
       await savePasted(clip);
     } catch {
-      setStatus("Clipboard access was blocked. Long-press the box below and choose Paste instead.");
+      setStatus("Clipboard access was blocked. Long-press the text box and choose Paste instead.");
     }
   }
 
@@ -408,7 +499,7 @@ export default function App() {
       positionRef.current = { docId: null, wordIndex: 0, readWords: 0 };
       store.remove("rsvp:currentDoc");
       if (list[0]) await openDoc(list[0].id, { quiet: true });
-      else { setDocId(null); setText(SAMPLE_TEXT); setTitle("Sample text"); setIndex(0); }
+      else { setDocId(null); setText(SAMPLE_TEXT); setTitle("Welcome"); setIndex(0); }
     }
   }
 
@@ -432,181 +523,179 @@ export default function App() {
     setStatus(trimmed ? "Inbox token saved." : "Inbox token removed.");
   }
 
-  function onDrop(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    setDragging(false);
-    handleFile(event.dataTransfer.files?.[0]);
+  function showLibrary() {
+    if (window.location.pathname !== "/") navigate("/");
+    requestAnimationFrame(() => {
+      libraryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      libraryRef.current?.querySelector("input")?.focus({ preventScroll: true });
+    });
   }
+
+  const dragHandlers = {
+    onDragEnter: (e) => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); setDragging(true); } },
+    onDragOver: (e) => { if (e.dataTransfer?.types?.includes("Files")) e.preventDefault(); },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false); },
+    onDrop: (e) => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files?.[0]); }
+  };
 
   const filteredDocs = useMemo(() => {
     const q = libraryQuery.trim().toLowerCase();
     return q ? docs.filter((d) => d.title.toLowerCase().includes(q)) : docs;
   }, [docs, libraryQuery]);
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const inboxUrl = `${origin}/api/inbox`;
-  const emailWebhook = `${origin}/api/inbox/email?token=${encodeURIComponent(inboxToken || "YOUR_TOKEN")}`;
-
-  // ---------- Styles ----------
-  const c = dark ? {
-    page: "#020617", text: "#f8fafc", panel: "#0f172a", panel2: "#111827", border: "#334155", muted: "#94a3b8", input: "#020617", active: "rgba(239,68,68,.14)"
-  } : {
-    page: "#f8fafc", text: "#0f172a", panel: "#ffffff", panel2: "#e2e8f0", border: "#cbd5e1", muted: "#475569", input: "#ffffff", active: "rgba(239,68,68,.10)"
+  const stageProps = {
+    current, playing, fontSize, pivot, chunkSize, focusLine, dragging,
+    onBack: backSentence, onToggle: togglePlay, onNext: nextSentence
   };
 
-  const button = { font: "inherit", fontWeight: 800, border: `1px solid ${c.border}`, background: c.panel2, color: c.text, borderRadius: 14, padding: "12px 14px", cursor: "pointer" };
-  const small = { ...button, padding: "8px 10px", borderRadius: 10, fontSize: 14 };
-  const primary = { ...button, background: "#ef4444", borderColor: "#ef4444", color: "white", minWidth: 96 };
-  const input = { font: "inherit", fontSize: 16, width: "100%", boxSizing: "border-box", border: `1px solid ${c.border}`, background: c.input, color: c.text, borderRadius: 14, padding: 13 };
-  const panel = { background: c.panel, border: `1px solid ${c.border}`, borderRadius: 24, padding: 16, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, alignContent: "start", minWidth: 0 };
-  const code = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, background: c.panel2, border: `1px solid ${c.border}`, borderRadius: 8, padding: "2px 6px", wordBreak: "break-all" };
+  // ---------- Views ----------
+  const reader = (
+    <section className={`reader-card${dragging ? " dragging" : ""}`} {...dragHandlers} aria-label="Reader">
+      <div className="reader-meta">
+        <span className="reader-title" title={title}>{title}</span>
+        <span>{words.length.toLocaleString()} words · {progress}% · {formatDuration(minutesLeft)} left</span>
+      </div>
+      <div className="bar"><div style={{ width: `${progress}%` }} /></div>
+      <Stage {...stageProps} />
+      <div className="transport">
+        <button className="btn" onClick={() => { setPlaying(false); setIndex(0); }} title="Back to the beginning (R)" aria-label="Start over"><span className="ico" aria-hidden="true">⏮&#xFE0E;</span><span className="lbl">Start</span></button>
+        <button className="btn" onClick={backSentence} title="Previous sentence (Shift+←)" aria-label="Previous sentence"><span className="ico" aria-hidden="true">«</span><span className="lbl">Back</span></button>
+        <button className="btn primary" onClick={togglePlay} title="Play or pause (Space)">{playing ? "Pause" : "Play"}</button>
+        <button className="btn" onClick={nextSentence} title="Next sentence (Shift+→)" aria-label="Next sentence"><span className="ico" aria-hidden="true">»</span><span className="lbl">Next</span></button>
+        <button className="btn" onClick={enterFocus} title="Full-screen reading (F)" aria-label="Focus mode"><span className="ico" aria-hidden="true">⛶</span><span className="lbl">Focus</span></button>
+      </div>
+      {status && <div className="status" role="status">{status}</div>}
+    </section>
+  );
+
+  const library = (
+    <section ref={libraryRef} className="panel library-area" aria-label="Library" style={{ scrollMarginTop: "calc(var(--nav-h) + 12px)" }}>
+      <div className="panel-head">
+        <h2>Library <span className="muted small">({docs.length})</span></h2>
+        {inboxToken && <button className="btn sm" onClick={() => syncInbox()}>Check inbox</button>}
+      </div>
+      {docs.length > 4 && <input className="field" type="search" value={libraryQuery} onChange={(e) => setLibraryQuery(e.target.value)} placeholder="Search your library" />}
+      {!docs.length && <div className="muted small">Nothing saved yet. Anything you add shows up here with your progress, so you can pick up where you left off.</div>}
+      <div className="doc-list">
+        {filteredDocs.map((doc) => {
+          const pct = docProgress(doc);
+          const left = ((doc.wordCount || 0) - (doc.readWords || 0)) / wpm;
+          return (
+            <div key={doc.id} className={`doc${doc.id === docId ? " current" : ""}`}>
+              <button className="doc-open" onClick={() => openDoc(doc.id)} title={doc.title}>
+                <div className="doc-title">{doc.title}</div>
+                <div className="doc-meta">
+                  {pct >= 100 ? "Finished" : `${pct}% · ${formatDuration(left)} left`} · {SOURCE_LABEL[doc.source] || "Saved"} · {formatAgo(doc.lastOpenedAt)}
+                </div>
+                <div className="bar"><div style={{ width: `${pct}%` }} /></div>
+              </button>
+              <button aria-label={`Delete ${doc.title}`} className="btn sm ghost" onClick={() => removeDoc(doc)}>✕</button>
+            </div>
+          );
+        })}
+        {docs.length > 0 && !filteredDocs.length && <div className="muted small">No matches.</div>}
+      </div>
+    </section>
+  );
+
+  const rest = (
+    <div className="rest-area">
+      <div className="two-col">
+        <section className="panel" aria-label="Add">
+          <h2>Add</h2>
+          <form className="row" onSubmit={(e) => { e.preventDefault(); importUrl(); }}>
+            <input className="field" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Article link" inputMode="url" autoCapitalize="off" autoCorrect="off" />
+            <button className="btn primary" type="submit">Import</button>
+          </form>
+          <label className="btn" style={{ textAlign: "center" }}>
+            Choose file (PDF, EPUB, TXT…)
+            <input type="file" accept={ACCEPTED_FILES} onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }} hidden />
+          </label>
+          <textarea className="field" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="Paste text or a link" rows={4} />
+          <div className="row">
+            <button className="btn primary" onClick={() => savePasted()} disabled={!pasteText.trim()}>Save &amp; read</button>
+            {navigator.clipboard?.readText && <button className="btn" onClick={pasteFromClipboard}>Paste from clipboard</button>}
+          </div>
+          <div className="muted small kbd-only">Tip: you can also drag a file onto the reader.</div>
+          {docId && <button className="btn ghost" onClick={() => setShowText((s) => !s)}>{showText ? "Hide text" : "View or edit this document's text"}</button>}
+          {showText && <textarea className="field" value={text} onChange={(e) => editText(e.target.value)} rows={10} />}
+        </section>
+
+        <section className="panel" aria-label="Settings">
+          <h2>Settings</h2>
+          <label className="slider">Speed: {wpm} words per minute<input type="range" min="100" max="1000" step="25" value={wpm} onChange={(e) => setWpm(Number(e.target.value))} /></label>
+          <label className="slider">Words per flash: {chunkSize}<input type="range" min="1" max="5" step="1" value={chunkSize} onChange={(e) => changeChunkSize(Number(e.target.value))} /></label>
+          <label className="slider">Text size: {fontSize}px<input type="range" min="38" max="120" step="2" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} /></label>
+          <label className="slider">Position: {chunks.length ? index + 1 : 0} of {chunks.length}<input type="range" min="0" max={maxIndex} step="1" value={index} onChange={(e) => setIndex(Number(e.target.value))} /></label>
+          <label className="toggle">Pivot letter <input type="checkbox" checked={pivot} disabled={chunkSize !== 1} onChange={(e) => setPivot(e.target.checked)} /></label>
+          <label className="toggle">Focus line <input type="checkbox" checked={focusLine} onChange={(e) => setFocusLine(e.target.checked)} /></label>
+          <div className="muted small kbd-only">
+            <kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> word · <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> sentence · <kbd>↑</kbd><kbd>↓</kbd> speed · <kbd>F</kbd> focus · <Link to="/help#keys">all shortcuts</Link>
+          </div>
+        </section>
+      </div>
+
+      <section className="panel" aria-label="Inbox">
+        <div className="panel-head">
+          <h2>Inbox</h2>
+          <Link to="/help#phone" className="small">How to send from your phone or email</Link>
+        </div>
+        <div className="muted small">
+          On Android, install RAFAS and it appears in the Share menu. iPhone Shortcuts and email go through a private inbox, which needs the inbox token.
+          {server.inbox === false && " The inbox isn't switched on for this site yet."}
+        </div>
+        <form className="row" onSubmit={(e) => { e.preventDefault(); saveToken(); }}>
+          <input className="field" type="password" value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder="Inbox token" autoComplete="off" />
+          <button className="btn primary" type="submit">Save</button>
+        </form>
+      </section>
+    </div>
+  );
+
+  let page;
+  if (path === "/") {
+    page = <div className="layout"><div className="reader-area">{reader}</div>{library}{rest}</div>;
+  } else if (path === "/about") page = <About />;
+  else if (path === "/help") page = <Help inboxEmail={server.email || DEFAULT_INBOX_EMAIL} inboxEnabled={server.inbox !== false} hasToken={Boolean(inboxToken)} />;
+  else if (path === "/privacy") page = <Privacy />;
+  else page = <article className="page"><h1>Page not found</h1><p><Link to="/">Back to reading</Link></p></article>;
 
   return (
-    <div style={{ minHeight: "100vh", background: c.page, color: c.text, fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif", padding: "env(safe-area-inset-top) 14px calc(24px + env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
-      <main style={{ maxWidth: 1040, margin: "0 auto", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", paddingTop: 18 }}>
-          <div>
-            <div style={{ color: c.muted, fontSize: 13, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase" }}>RSVP Reader</div>
-            <h1 style={{ margin: "6px 0 4px", fontSize: "clamp(30px, 8vw, 54px)", lineHeight: 0.98 }}>Read faster. Blink responsibly.</h1>
-            <div style={{ color: c.muted, lineHeight: 1.45 }}>PDF, EPUB, TXT, MD, HTML, web articles, or pasted text. Everything is saved with your place in it.</div>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button style={button} onClick={() => libraryRef.current?.scrollIntoView({ behavior: "smooth" })}>Library ({docs.length})</button>
-            <button style={button} onClick={() => setDark((d) => !d)}>{dark ? "Light" : "Dark"}</button>
-          </div>
-        </header>
+    <>
+      <header className="topbar">
+        <Link to="/" className="brand" aria-label={`${APP_NAME} home`}>
+          <span className="brand-mark">RAF<span>A</span>S</span>
+          <span className="brand-tag">{APP_LONG_NAME}</span>
+        </Link>
+        <nav className="nav" aria-label="Main">
+          <button onClick={showLibrary}>Library</button>
+          <Link to="/help" aria-current={path === "/help" ? "page" : undefined}>Help</Link>
+          <Link to="/about" aria-current={path === "/about" ? "page" : undefined}>About</Link>
+          <button onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title="Switch theme">
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+        </nav>
+      </header>
 
-        <section
-          onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
-          onDrop={onDrop}
-          style={{ background: c.panel, border: `2px dashed ${dragging ? "#ef4444" : c.border}`, borderRadius: 26, padding: 16, boxShadow: "0 20px 50px rgba(0,0,0,.20)", transition: "border-color 120ms ease, transform 120ms ease", transform: dragging ? "scale(1.01)" : "scale(1)" }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", color: c.muted, fontSize: 14, marginBottom: 10 }}>
-            <span style={{ fontWeight: 700, color: c.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{title}</span>
-            <span>{words.length.toLocaleString()} words · {progress}% · {formatDuration(minutesLeft)} left</span>
-          </div>
-          <div style={{ height: 9, background: c.panel2, borderRadius: 999, overflow: "hidden", marginBottom: 16 }}>
-            <div style={{ height: "100%", width: `${progress}%`, background: "#ef4444", transition: "width 120ms linear" }} />
-          </div>
-          <div onClick={() => setPlaying((p) => !p)} style={{ position: "relative", minHeight: "min(46vh, 390px)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", border: `1px solid ${dragging ? "#ef4444" : c.border}`, borderRadius: 24, background: dragging ? "rgba(239,68,68,.12)" : c.input, padding: 18, userSelect: "none", cursor: "pointer", overflow: "hidden" }}>
-            {focusLine && !dragging && <div style={{ position: "absolute", left: "50%", top: 16, bottom: 16, width: 1, background: dark ? "rgba(255,255,255,.65)" : "rgba(15,23,42,.38)", transform: "translateX(-50%)", pointerEvents: "none" }} />}
-            <div style={{ position: "relative", zIndex: 1, fontSize: `clamp(38px, 13vw, ${fontSize}px)`, fontWeight: 900, lineHeight: 1.08, maxWidth: "100%", wordBreak: "break-word" }}>
-              {dragging ? "Drop file to load" : <PivotWord text={current} enabled={pivot && chunkSize === 1} />}
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 14 }}>
-            <button style={button} onClick={() => { setPlaying(false); setIndex(0); }}>Restart</button>
-            <button style={button} onClick={() => setIndex((i) => clamp(i - 10, 0, maxIndex))}>-10</button>
-            <button style={primary} onClick={() => setPlaying((p) => !p)}>{playing ? "Pause" : "Play"}</button>
-            <button style={button} onClick={() => setIndex((i) => clamp(i + 10, 0, maxIndex))}>+10</button>
-          </div>
-          {status && <div role="status" style={{ color: c.muted, fontSize: 14, marginTop: 12 }}>{status}</div>}
-        </section>
+      <main className="shell">{page}</main>
 
-        <section ref={libraryRef} style={{ ...panel, scrollMarginTop: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <h2 style={{ margin: 0 }}>Library</h2>
-            {inboxToken && <button style={small} onClick={() => syncInbox()}>Check inbox</button>}
-          </div>
-          {docs.length > 5 && <input value={libraryQuery} onChange={(e) => setLibraryQuery(e.target.value)} placeholder="Search your library" style={input} />}
-          {!docs.length && <div style={{ color: c.muted }}>Nothing saved yet. Import a file, a URL, or pasted text and it will show up here with your progress.</div>}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
-            {filteredDocs.map((doc) => {
-              const pct = docProgress(doc);
-              const left = ((doc.wordCount || 0) - (doc.readWords || 0)) / wpm;
-              const isCurrent = doc.id === docId;
-              return (
-                <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${isCurrent ? "#ef4444" : c.border}`, background: isCurrent ? c.active : c.panel2, borderRadius: 16, padding: 10 }}>
-                  <button onClick={() => openDoc(doc.id)} style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", color: c.text, padding: 0, cursor: "pointer", font: "inherit" }}>
-                    <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.title}</div>
-                    <div style={{ color: c.muted, fontSize: 13, marginTop: 3 }}>
-                      {pct >= 100 ? "Finished" : `${pct}% · ${formatDuration(left)} left`} · {(doc.wordCount || 0).toLocaleString()} words · {SOURCE_LABEL[doc.source] || "Saved"} · {formatAgo(doc.lastOpenedAt)}
-                    </div>
-                    <div style={{ height: 4, background: c.border, borderRadius: 999, overflow: "hidden", marginTop: 6 }}>
-                      <div style={{ height: "100%", width: `${pct}%`, background: "#ef4444" }} />
-                    </div>
-                  </button>
-                  <button aria-label={`Delete ${doc.title}`} style={{ ...small, background: "transparent" }} onClick={() => removeDoc(doc)}>✕</button>
-                </div>
-              );
-            })}
-          </div>
-        </section>
+      <footer className="footer">
+        <span>{APP_NAME} · {APP_LONG_NAME}</span>
+        <Link to="/help">Help</Link>
+        <Link to="/about">About</Link>
+        <Link to="/privacy">Privacy</Link>
+      </footer>
 
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(285px, 1fr))", gap: 16 }}>
-          <div style={panel}>
-            <h2 style={{ margin: 0 }}>Import</h2>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") importUrl(); }} placeholder="Paste article URL" inputMode="url" style={input} />
-              <button style={primary} onClick={() => importUrl()}>Import</button>
-            </div>
-            <input type="file" accept={ACCEPTED_FILES} onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }} style={{ color: c.muted }} />
-            <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="Paste text or a link here" style={{ ...input, minHeight: 110, lineHeight: 1.5, resize: "vertical" }} />
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button style={primary} onClick={() => savePasted()} disabled={!pasteText.trim()}>Save &amp; read</button>
-              {navigator.clipboard?.readText && <button style={button} onClick={pasteFromClipboard}>Paste from clipboard</button>}
-            </div>
-            {docId && <button style={button} onClick={() => setShowText((s) => !s)}>{showText ? "Hide text" : "View/edit current text"}</button>}
-            {showText && <textarea value={text} onChange={(e) => editText(e.target.value)} style={{ ...input, minHeight: 230, lineHeight: 1.5, resize: "vertical" }} />}
+      {focus && path === "/" && (
+        <div className="focus" role="dialog" aria-label="Focus reading">
+          <div className="bar"><div style={{ width: `${progress}%` }} /></div>
+          <div className="focus-bar">
+            <span>{progress}% · {formatDuration(minutesLeft)} left · {wpm} wpm</span>
+            <button className="btn sm" onClick={exitFocus} aria-label="Leave focus mode">✕</button>
           </div>
-
-          <div style={{ ...panel, gap: 14 }}>
-            <h2 style={{ margin: 0 }}>Controls</h2>
-            <label style={{ color: c.muted }}>Speed: {wpm} WPM<input type="range" min="100" max="900" step="25" value={wpm} onChange={(e) => setWpm(Number(e.target.value))} style={{ width: "100%" }} /></label>
-            <label style={{ color: c.muted }}>Words per flash: {chunkSize}<input type="range" min="1" max="5" step="1" value={chunkSize} onChange={(e) => changeChunkSize(Number(e.target.value))} style={{ width: "100%" }} /></label>
-            <label style={{ color: c.muted }}>Font size: {fontSize}px<input type="range" min="38" max="110" step="2" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} style={{ width: "100%" }} /></label>
-            <label style={{ color: c.muted }}>Position: {chunks.length ? index + 1 : 0} / {chunks.length}<input type="range" min="0" max={maxIndex} step="1" value={index} onChange={(e) => setIndex(Number(e.target.value))} style={{ width: "100%" }} /></label>
-            <label style={{ display: "flex", justifyContent: "space-between", color: c.muted }}>Pivot letter <input type="checkbox" checked={pivot} disabled={chunkSize !== 1} onChange={(e) => setPivot(e.target.checked)} /></label>
-            <label style={{ display: "flex", justifyContent: "space-between", color: c.muted }}>Focus line <input type="checkbox" checked={focusLine} onChange={(e) => setFocusLine(e.target.checked)} /></label>
-            <div style={{ color: c.muted, fontSize: 14 }}>Keyboard: Space play/pause, ← → step, R restart.</div>
-          </div>
-        </section>
-
-        <section style={panel}>
-          <h2 style={{ margin: 0 }}>Send to reader</h2>
-          <details>
-            <summary style={{ cursor: "pointer", fontWeight: 800 }}>Android: share sheet</summary>
-            <div style={{ color: c.muted, lineHeight: 1.5, marginTop: 8 }}>
-              In Chrome, open the menu and choose <b>Add to Home screen</b> (or <b>Install app</b>). After that, <b>RSVP</b> appears in the Share menu of any app. Share a web page, selected text, or a PDF/EPUB file and it opens here, saved to your library.
-            </div>
-          </details>
-
-          <div style={{ color: c.muted, lineHeight: 1.5 }}>
-            iPhone and email sending go through a private inbox on your server.{" "}
-            {serverInbox === false && <b>The inbox is off: set the INBOX_TOKEN variable on the server to turn it on.</b>}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input type="password" value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder="Inbox token (same as INBOX_TOKEN)" autoComplete="off" style={input} />
-            <button style={primary} onClick={saveToken}>Save</button>
-          </div>
-
-          <details>
-            <summary style={{ cursor: "pointer", fontWeight: 800 }}>iPhone / iPad: Shortcut</summary>
-            <ol style={{ color: c.muted, lineHeight: 1.6, paddingLeft: 20, marginBottom: 0 }}>
-              <li>Open Shortcuts, tap <b>+</b>, then tap the <b>ⓘ</b> button and turn on <b>Show in Share Sheet</b>. Set it to receive Files, Text, URLs, Safari web pages and PDFs.</li>
-              <li>Add <b>Get Contents of URL</b>. URL: <span style={code}>{inboxUrl}</span></li>
-              <li>Tap <b>Show More</b>: Method <b>POST</b>, add header <span style={code}>Authorization</span> = <span style={code}>Bearer {inboxToken ? "•••• (your token)" : "YOUR_TOKEN"}</span>.</li>
-              <li>Request Body <b>Form</b>: add a <b>File</b> field named <span style={code}>file</span> set to <b>Shortcut Input</b>. For links or text, add a <b>Text</b> field named <span style={code}>text</span> instead.</li>
-              <li>Name it "Send to RSVP". Share anything to it, then open this app: it pulls the inbox automatically.</li>
-            </ol>
-          </details>
-
-          <details>
-            <summary style={{ cursor: "pointer", fontWeight: 800 }}>Email</summary>
-            <div style={{ color: c.muted, lineHeight: 1.6, marginTop: 8 }}>
-              Set up an inbound email service (Postmark Inbound, SendGrid Inbound Parse, or Mailgun Routes) on an address you control, and point its webhook at:
-              <div style={{ margin: "8px 0", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={code}>{inboxToken ? emailWebhook.replace(encodeURIComponent(inboxToken), "••••") : emailWebhook}</span>
-                {inboxToken && navigator.clipboard?.writeText && <button style={small} onClick={() => navigator.clipboard.writeText(emailWebhook).then(() => setStatus("Webhook URL copied."))}>Copy</button>}
-              </div>
-              Then email or forward anything to that address. PDF, EPUB, TXT and HTML attachments are imported as documents. An email that is just a link imports the article. Otherwise the email body is imported as text.
-            </div>
-          </details>
-        </section>
-      </main>
-    </div>
+          <Stage {...stageProps} fill />
+        </div>
+      )}
+    </>
   );
 }

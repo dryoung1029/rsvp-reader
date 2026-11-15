@@ -1,60 +1,111 @@
-# RSVP Reader
+# RAFAS: Read As Fast As Swizz
 
-A mobile-friendly rapid serial visual presentation reader. Import web articles, PDFs (with OCR fallback for scans), EPUBs, text files or pasted text, and read them one word at a time with adjustable speed, chunk size, pivot letter and focus line.
+A speed reader that shows one word at a time (RSVP), built for phones and computers. Read web articles, PDFs (with OCR for scans), EPUBs, text files and pasted text. Everything goes into a library that remembers your place.
 
-## Library and resume
+Live at **https://rafas.app** (Cloudflare Workers).
 
-Every document you open is saved in the browser (IndexedDB) with your reading position. The Library section lists them by most recently opened, with progress and time left, and opening one resumes where you stopped. Positions are stored as a word offset, so changing "words per flash" keeps your place. Sharing or importing the same document again reopens the saved copy instead of making a duplicate.
+## Features
 
-The library lives on each device/browser. It is not synced between your phone and your computer.
+- Library stored on the device (IndexedDB) with per-document progress and resume.
+- Phone layout with tap zones (left/right edge = previous/next sentence, middle = play/pause) and a full-screen focus mode.
+- Computer layout with the library in a sidebar, drag-and-drop files, and keyboard shortcuts (Space, ←/→, Shift+←/→, ↑/↓, F, Esc, R).
+- Installable PWA. On Android it appears in the Share menu (Web Share Target).
+- Private inbox for iPhone Shortcuts and email, which the app pulls from when opened.
+- About, Help and Privacy pages at `/about`, `/help`, `/privacy`.
 
-## Sending documents to the reader
+## Layout
 
-### Android share sheet
+| Path | What |
+| --- | --- |
+| `src/` | React frontend (Vite). `App.jsx` holds the reader; `pages/` has About, Help, Privacy. |
+| `src/lib/` | Text helpers, file parsers (PDF, EPUB, OCR), IndexedDB library. |
+| `public/` | Manifest, icons, service worker (`sw.js`). |
+| `worker/index.js` | Cloudflare Worker: `/api/extract`, `/api/inbox`, `/share` fallback, and the email handler. |
+| `wrangler.jsonc` | Worker config: static assets, KV binding, custom domain. |
 
-The app is an installable PWA with a Web Share Target. In Chrome, use **Add to Home screen / Install app**. After that, **RSVP** shows up in the Android share sheet for web pages, selected text and PDF/EPUB/TXT files. No server setup is needed.
+## Local development
 
-### iPhone (Shortcut) and email: the server inbox
+```bash
+npm install
+```
 
-iOS does not let web apps appear in the share sheet, and email needs a server to receive it, so both go through a small inbox on the server. Items wait there until the app is opened (or brought back to the foreground), then get imported into the library and removed from the server.
+Create `.dev.vars` (not committed) with local secrets:
 
-1. Set a long random `INBOX_TOKEN` environment variable on the server. The inbox is disabled without it.
-2. In the app, open **Send to reader** and enter the same token. The section has step-by-step instructions for the iOS Shortcut and the email webhook.
+```
+INBOX_TOKEN=dev-token
+ALLOWED_SENDERS=you@example.com
+```
 
-Inbox endpoints (auth with `Authorization: Bearer <token>`, Basic auth with the token as password, or `?token=`):
+Run the built app and the Worker together on http://localhost:8787:
+
+```bash
+npm run preview
+```
+
+For frontend hot reload, run `npx wrangler dev` in one terminal and `npm run dev` in another. Vite forwards `/api` to the Worker.
+
+## Deploying to Cloudflare
+
+One-time setup:
+
+1. Add `rafas.app` to your Cloudflare account (it's already there if you bought it through Cloudflare Registrar).
+2. Sign in:
+
+   ```bash
+   npx wrangler login
+   ```
+
+3. Create the inbox storage and paste the printed `id` into `wrangler.jsonc` in place of `REPLACE_WITH_KV_NAMESPACE_ID`:
+
+   ```bash
+   npx wrangler kv namespace create INBOX
+   ```
+
+4. Set the secrets. Use a long random string for the token; you'll enter it once in the app on each device.
+
+   ```bash
+   npx wrangler secret put INBOX_TOKEN
+   ```
+
+   ```bash
+   npx wrangler secret put ALLOWED_SENDERS
+   ```
+
+5. Deploy. This also attaches `rafas.app` as the Worker's custom domain.
+
+   ```bash
+   npm run deploy
+   ```
+
+To deploy automatically on every push instead, connect this GitHub repo under Workers & Pages → rafas → Settings → Builds, with build command `npm run build` and deploy command `npx wrangler deploy`.
+
+### Email
+
+1. Cloudflare dashboard → rafas.app → Email → Email Routing → enable it (Cloudflare adds the MX and TXT records).
+2. Routing rules → create a custom address `read@rafas.app` with the action **Send to a Worker** → `rafas`.
+3. Make sure your own address is in `ALLOWED_SENDERS`. Mail from anyone else is rejected.
+
+If you pick a different address, change `INBOX_EMAIL` in `wrangler.jsonc` so the Help page shows it.
+
+### Inbox API
+
+Auth with `Authorization: Bearer <INBOX_TOKEN>` (or Basic auth with the token as the password, or `?token=`).
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/api/inbox` | JSON or form with `title`, `text`, `url`, and/or `file` uploads |
-| POST | `/api/inbox/email` | Inbound email webhook (Postmark JSON, SendGrid Inbound Parse, Mailgun Routes) |
+| POST | `/api/inbox` | JSON or form with `title`, `text`, `url`, and/or `file` uploads (24 MB max per item) |
 | GET | `/api/inbox` | List waiting items |
-| GET | `/api/inbox/:id/file` | Download an uploaded file |
+| GET | `/api/inbox/:id` | Item body: file bytes, or JSON `{ text, url }` |
 | DELETE | `/api/inbox/:id` | Remove an item |
 
-For email: PDF/EPUB/TXT/MD/HTML attachments become documents, an email that is just a link imports the article, and anything else is imported as the body text.
-
-Example:
+Items not picked up expire after 30 days.
 
 ```bash
-curl -X POST https://your-app.example/api/inbox -H "Authorization: Bearer $INBOX_TOKEN" -F file=@book.epub
+curl -X POST https://rafas.app/api/inbox -H "Authorization: Bearer $INBOX_TOKEN" -F file=@book.epub
 ```
 
-## Deploy (Railway)
+## Limits worth knowing
 
-Build command:
-
-```bash
-npm run build
-```
-
-Start command:
-
-```bash
-npm run start
-```
-
-Environment variables:
-
-- `PORT`: set by Railway.
-- `INBOX_TOKEN`: enables the iOS/email inbox.
-- `DATA_DIR`: where inbox items are stored (default `./data`). Railway's filesystem is wiped on redeploy, so attach a volume and point `DATA_DIR` at it if you want items that haven't been picked up yet to survive a deploy.
+- The Workers Free plan allows 10 ms of CPU per request. Importing very long web articles can exceed that and fail; the Workers Paid plan raises the limit.
+- KV on the Free plan allows 1,000 writes a day, which is far more than the inbox needs.
+- The library is per device and browser. It is not synced.

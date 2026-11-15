@@ -1,7 +1,7 @@
 {
-  "name": "RSVP Reader",
-  "short_name": "RSVP",
-  "description": "Speed-read articles, PDFs and EPUBs one word at a time.",
+  "name": "RAFAS: Read As Fast As Swizz",
+  "short_name": "RAFAS",
+  "description": "Speed-read articles, PDFs and EPUBs one word at a time. Pick up where you left off.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -3,15 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>RAFAS</title>
+    <meta name="description" content="RAFAS (Read As Fast As Swizz) is a speed reader that shows one word at a time. Read articles, PDFs and EPUBs on your phone or computer and pick up where you left off." />
     <meta name="theme-color" content="#020617" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="RSVP" />
+    <meta name="apple-mobile-web-app-title" content="RAFAS" />
+    <meta property="og:title" content="RAFAS: Read As Fast As Swizz" />
+    <meta property="og:description" content="A speed reader that shows one word at a time, for phone and computer." />
+    <meta property="og:url" content="https://rafas.app/" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" href="/icon-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <title>RSVP Reader</title>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      try {
+        var t = localStorage.getItem("rsvp:theme") || (localStorage.getItem("rsvp:dark") === "false" ? "light" : null)
+          || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+        document.documentElement.dataset.theme = t;
+      } catch (e) { document.documentElement.dataset.theme = "dark"; }
+    </script>
   </head>
-  <body style="margin:0;background:#020617">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
