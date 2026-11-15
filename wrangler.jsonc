@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rafas",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/share"]
+  },
+  // Create with: npx wrangler d1 create rafas   (then paste the database_id here)
+  // Apply schema: npx wrangler d1 migrations apply rafas --remote
+  "d1_databases": [
+    { "binding": "DB", "database_name": "rafas", "database_id": "REPLACE_WITH_D1_DATABASE_ID", "migrations_dir": "migrations" }
+  ],
+  // Create with: npx wrangler kv namespace create INBOX  (then paste the id here)
+  "kv_namespaces": [
+    { "binding": "INBOX", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }
+  ],
+  "vars": {
+    "APP_URL": "https://rafas.app",
+    // Address set up in Cloudflare Email Routing to send to this Worker (shown on the Help page).
+    "INBOX_EMAIL": "read@rafas.app",
+    // Sender for sign-in emails. The domain must be verified in Resend.
+    "EMAIL_FROM": "RAFAS <signin@rafas.app>",
+    // Optional cloud pickers. These values are public by design; leave empty to hide the buttons.
+    "GOOGLE_CLIENT_ID": "",
+    "GOOGLE_API_KEY": "",
+    "GOOGLE_APP_ID": "",
+    "DROPBOX_APP_KEY": ""
+  },
+  // Secrets (not stored in this file):
+  //   npx wrangler secret put RESEND_API_KEY   from resend.com, for sign-in emails
+  //   npx wrangler secret put ADMIN_EMAILS     comma-separated; these people can sign in without an invite and manage invites
+  "routes": [
+    { "pattern": "rafas.app", "custom_domain": true }
+  ],
+  "observability": { "enabled": true },
+  // Keep local dev on http://localhost instead of pretending to be rafas.app.
+  "dev": { "port": 8787, "local_protocol": "http", "upstream_protocol": "http", "host": "localhost:8787" }
+}
