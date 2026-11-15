@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.js";
 import { Link } from "../router.jsx";
 import { formatAgo } from "../lib/text.js";
@@ -123,6 +123,33 @@ function InviteAdmin() {
   );
 }
 
+// "Send to RAFAS" bookmarklet. It opens RAFAS in a small window and hands it the
+// page you're on, so articles behind a login or paywall can be saved too.
+function bookmarkletCode(origin) {
+  const js = `(()=>{const o=${JSON.stringify(origin)};const w=window.open(o+"/add?via=bookmarklet&url="+encodeURIComponent(location.href)+"&title="+encodeURIComponent(document.title),"rafas_add","width=520,height=720");if(!w){location.href=o+"/add?url="+encodeURIComponent(location.href);return}const h=e=>{if(e.origin!==o||e.source!==w||!e.data||e.data.type!=="rafas-ready")return;removeEventListener("message",h);w.postMessage({type:"rafas-page",url:location.href,title:document.title,html:document.documentElement.outerHTML,selection:String(getSelection())},o)};addEventListener("message",h)})()`;
+  return `javascript:${encodeURIComponent(js)}`;
+}
+
+function Bookmarklet() {
+  const ref = useRef(null);
+  const code = bookmarkletCode(window.location.origin);
+  // Set the href directly: React warns about javascript: links in JSX.
+  useEffect(() => { ref.current?.setAttribute("href", code); }, [code]);
+  return (
+    <section className="panel">
+      <h2>Save pages from your computer</h2>
+      <p>
+        Drag this button to your browser's bookmarks bar. On any article, click it to save the page to your library.
+        It works on pages you're signed in to, and if you select some text first, just that text is saved.
+      </p>
+      <div>
+        <a ref={ref} className="btn primary bookmarklet" onClick={(e) => { e.preventDefault(); }} title="Drag me to your bookmarks bar">Send to RAFAS</a>
+      </div>
+      <p className="muted small">Bookmarks bar hidden? Press Ctrl+Shift+B (Windows) or Cmd+Shift+B (Mac). You may need to allow pop-ups for the site you're saving from.</p>
+    </section>
+  );
+}
+
 export default function Account({ user, setUser, config, onSignOut }) {
   const [name, setName] = useState(user.name);
   const [token, setToken] = useState("");
@@ -200,6 +227,8 @@ export default function Account({ user, setUser, config, onSignOut }) {
           <div><button className="btn" onClick={makeToken}>{user.hasInboxToken ? "Make a new Shortcut token" : "Create Shortcut token"}</button></div>
         )}
       </section>
+
+      <Bookmarklet />
 
       {user.isAdmin && <InviteAdmin />}
 

@@ -89,7 +89,7 @@ export async function putDoc(doc, text) {
 
 // Adds a document, or returns the existing one if the same text was saved before
 // (so sharing the same article twice resumes it instead of duplicating it).
-export async function addDoc({ title, text, source = "paste", sourceUrl = "", wordCount }) {
+export async function addDoc({ title, text, source = "paste", sourceUrl = "", wordCount, chapters = [] }) {
   const existing = (await listDocs()).find((d) => d.title === title && d.wordCount === wordCount && d.chars === text.length);
   if (existing) return await updateDoc(existing.id, { lastOpenedAt: Date.now() });
   const now = Date.now();
@@ -97,7 +97,7 @@ export async function addDoc({ title, text, source = "paste", sourceUrl = "", wo
     id: newId(), title, source, sourceUrl, wordCount, chars: text.length,
     wordIndex: 0, readWords: 0, positionAt: now, serverPositionAt: 0,
     createdAt: now, updatedAt: now, lastOpenedAt: now,
-    textVersion: 1, synced: false, textMissing: false
+    textVersion: 1, synced: false, textMissing: false, chapters, sharedBy: ""
   }, text);
 }
 

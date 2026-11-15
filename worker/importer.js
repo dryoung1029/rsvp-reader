@@ -65,7 +65,9 @@ function htmlToArticle(html, url) {
   const pageTitle = document.querySelector("title")?.textContent?.trim() || "";
   let article = null;
   try { article = new Readability(document).parse(); } catch (error) { console.warn("readability failed", error.message); }
-  return { title: article?.title || pageTitle || url, text: article?.textContent || htmlToText(html) };
+  // Convert Readability's HTML ourselves: its textContent runs paragraphs together
+  // ("end.Next") when the page has no whitespace between tags.
+  return { title: article?.title || pageTitle || url, text: htmlToText(article?.content || "") || htmlToText(html) };
 }
 
 function filenameFrom(response, url) {

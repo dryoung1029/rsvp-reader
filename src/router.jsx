@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react";
 
 const listeners = new Set();
 
-export function navigate(to) {
-  if (to === window.location.pathname + window.location.hash) return;
-  window.history.pushState(null, "", to);
+export function navigate(to, { replace = false } = {}) {
+  if (!replace && to === window.location.pathname + window.location.hash) return;
+  if (replace) window.history.replaceState(null, "", to);
+  else window.history.pushState(null, "", to);
   listeners.forEach((fn) => fn());
   const hash = to.split("#")[1];
   if (hash) requestAnimationFrame(() => document.getElementById(hash)?.scrollIntoView());

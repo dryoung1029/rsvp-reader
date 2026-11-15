@@ -26,10 +26,24 @@ export default function Privacy() {
         removes your account and everything in your library.
       </p>
 
+      <h2>Reading stats</h2>
+      <p>
+        RAFAS records how many words you read each day and for how long, to show your progress and streaks. If you join
+        the family board, other people on the board see your weekly total, streak and average speed. They never see
+        what you're reading.
+      </p>
+
+      <h2>Other members</h2>
+      <p>
+        Members can see each other's names, so they can send each other documents. Sending a document gives the other
+        person their own copy and emails them a notice.
+      </p>
+
       <h2>Importing</h2>
       <ul>
         <li><b>Web links and share links:</b> the RAFAS server fetches the page or file for you and passes it back. Nothing is kept on the server except the resulting document in your library.</li>
         <li><b>Files you choose:</b> PDFs, EPUBs and Word files are read on your own device.</li>
+        <li><b>The Send to RAFAS bookmark:</b> passes the page you're looking at straight to RAFAS in your browser, which keeps only the article text.</li>
         <li><b>Google Drive:</b> you sign in with Google in a Google window. RAFAS only gets access to the files you pick, and only on that device, for about an hour.</li>
         <li><b>Dropbox:</b> the Dropbox window gives RAFAS a link to the one file you pick.</li>
         <li><b>Scanned PDFs:</b> text recognition runs on your device. The first time, your browser downloads the recognition engine and English language data from jsDelivr, a public code delivery network.</li>

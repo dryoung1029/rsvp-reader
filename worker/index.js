@@ -7,6 +7,7 @@ import { handleAuth } from "./auth.js";
 import { handleDocs } from "./docs.js";
 import { handleInbox, buildItems, saveItems } from "./inbox.js";
 import { handleImporter } from "./importer.js";
+import { handleStats } from "./stats.js";
 
 // Public, non-secret settings the browser needs (picker keys are meant to be public).
 function config(env) {
@@ -25,7 +26,7 @@ async function handleApi(request, env, url) {
   if (pathname === "/api/config" && request.method === "GET") return json(config(env));
   if (!env.DB) throw new HttpError(503, "The database isn't set up. See the README.");
 
-  for (const handler of [handleAuth, handleDocs, handleInbox, handleImporter]) {
+  for (const handler of [handleAuth, handleDocs, handleStats, handleInbox, handleImporter]) {
     const response = await handler(request, env, pathname);
     if (response) return response;
   }

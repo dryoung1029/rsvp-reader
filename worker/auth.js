@@ -40,6 +40,7 @@ export function publicUser(user) {
     name: user.name,
     isAdmin: Boolean(user.is_admin),
     hasInboxToken: Boolean(user.inbox_token_hash),
+    shareStats: Boolean(user.share_stats),
     createdAt: user.created_at
   };
 }
@@ -105,7 +106,7 @@ async function findUsableInvite(env, code) {
 
 // ---------- Email ----------
 
-async function sendEmail(env, { to, subject, html, text }) {
+export async function sendEmail(env, { to, subject, html, text }) {
   if (!env.RESEND_API_KEY) {
     console.log(`[email not sent: RESEND_API_KEY missing] to=${to} subject=${subject}`);
     return;
@@ -282,10 +283,14 @@ export async function handleAuth(request, env, pathname) {
     if (method === "PATCH") {
       const user = await requireUser(request, env);
       const body = await readJson(request);
-      const name = cleanName(body.name);
-      if (!name) throw new HttpError(400, "Please enter a name.");
-      await env.DB.prepare("UPDATE users SET name = ? WHERE id = ?").bind(name, user.id).run();
-      return json({ user: publicUser({ ...user, name }) });
+      const next = { ...user };
+      if (body.name !== undefined) {
+        next.name = cleanName(body.name);
+        if (!next.name) throw new HttpError(400, "Please enter a name.");
+      }
+      if (body.shareStats !== undefined) next.share_stats = body.shareStats ? 1 : 0;
+      await env.DB.prepare("UPDATE users SET name = ?, share_stats = ? WHERE id = ?").bind(next.name, next.share_stats, user.id).run();
+      return json({ user: publicUser(next) });
     }
     if (method === "DELETE") {
       const user = await requireUser(request, env);
@@ -300,6 +305,13 @@ export async function handleAuth(request, env, pathname) {
     const token = `rafas_${randomToken(24)}`;
     await env.DB.prepare("UPDATE users SET inbox_token_hash = ? WHERE id = ?").bind(await sha256(token), user.id).run();
     return json({ token });
+  }
+
+  // Other members, for "Send to…". Names only.
+  if (pathname === "/api/members" && method === "GET") {
+    const user = await requireUser(request, env);
+    const { results } = await env.DB.prepare("SELECT id, name FROM users WHERE id != ? ORDER BY name COLLATE NOCASE").bind(user.id).all();
+    return json({ members: results });
   }
 
   const inviteMatch = pathname.match(/^\/api\/invites\/([a-z0-9]{6,32})$/);
@@ -371,6 +383,7 @@ export async function deleteUserData(env, userId) {
     env.DB.prepare("DELETE FROM document_text WHERE doc_id IN (SELECT id FROM documents WHERE user_id = ?)").bind(userId),
     env.DB.prepare("DELETE FROM documents WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM reading_days WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId)
   ]);
   if (env.INBOX) {

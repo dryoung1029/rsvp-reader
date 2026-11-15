@@ -8,10 +8,11 @@ import Help from "./pages/Help.jsx";
 import Privacy from "./pages/Privacy.jsx";
 import SignIn from "./pages/SignIn.jsx";
 import Account from "./pages/Account.jsx";
+import Progress from "./pages/Progress.jsx";
 
 const PAGE_TITLES = {
   "/": APP_NAME, "/about": `About · ${APP_NAME}`, "/help": `Help · ${APP_NAME}`, "/privacy": `Privacy · ${APP_NAME}`,
-  "/account": `Account · ${APP_NAME}`, "/signin": `Sign in · ${APP_NAME}`, "/verify": `Sign in · ${APP_NAME}`
+  "/account": `Account · ${APP_NAME}`, "/progress": `Progress · ${APP_NAME}`, "/add": `Saving · ${APP_NAME}`, "/signin": `Sign in · ${APP_NAME}`, "/verify": `Sign in · ${APP_NAME}`
 };
 
 const store = {
@@ -85,7 +86,9 @@ export default function App() {
 
   function onSignedIn(next) {
     setUser(next);
-    navigate("/");
+    // Coming from the bookmarklet: carry on saving the page after signing in.
+    if (window.location.pathname === "/add") navigate(`/add${window.location.search}`, { replace: true });
+    else navigate("/");
   }
 
   function onSignOut() {
@@ -107,6 +110,8 @@ export default function App() {
   else if (user === undefined) page = <div className="page"><p className="muted">Loading...</p></div>;
   else if (user) {
     if (path === "/account") page = <Account user={user} setUser={setUser} config={config} onSignOut={onSignOut} />;
+    else if (path === "/progress") page = <Progress user={user} setUser={setUser} />;
+    else if (path === "/add") page = null;
     else if (joinMatch || path === "/signin" || path === "/verify") {
       page = (
         <div className="auth-card panel">
@@ -118,7 +123,7 @@ export default function App() {
     } else if (path !== "/") page = <article className="page"><h1>Page not found</h1><p><Link to="/">Back to reading</Link></p></article>;
   } else if (joinMatch) page = <SignIn key={joinMatch[1]} mode="join" inviteCode={joinMatch[1].toLowerCase()} onSignedIn={onSignedIn} />;
   else if (path === "/verify") page = <SignIn mode="verify" onSignedIn={onSignedIn} />;
-  else if (path === "/signin" || path === "/" || path === "/account") page = <Landing onSignedIn={onSignedIn} />;
+  else if (["/signin", "/", "/account", "/progress", "/add"].includes(path)) page = <Landing onSignedIn={onSignedIn} />;
   else page = <article className="page"><h1>Page not found</h1><p><Link to="/">Home</Link></p></article>;
 
   return (
@@ -130,6 +135,7 @@ export default function App() {
         </Link>
         <nav className="nav" aria-label="Main">
           {user && <button onClick={showLibrary}>Library</button>}
+          {user && <Link to="/progress" aria-current={path === "/progress" ? "page" : undefined}>Progress</Link>}
           <Link to="/help" aria-current={path === "/help" ? "page" : undefined}>Help</Link>
           {!user && <Link to="/about" aria-current={path === "/about" ? "page" : undefined}>About</Link>}
           {user && (
@@ -146,7 +152,7 @@ export default function App() {
 
       <main className="shell">
         {/* The reader stays mounted while you visit other pages so playback state and position survive. */}
-        {user && config && <Reader key={user.id} user={user} config={config} visible={path === "/"} />}
+        {user && config && <Reader key={user.id} user={user} config={config} path={path} visible={path === "/" || path === "/add"} />}
         {page}
       </main>
 

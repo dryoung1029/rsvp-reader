@@ -7,6 +7,10 @@ const SECTIONS = [
   ["adding", "Adding documents"],
   ["cloud", "Google Drive, Dropbox, iCloud"],
   ["reading", "Reading controls"],
+  ["pacing", "Pacing and chapters"],
+  ["progress", "Progress and family board"],
+  ["sending", "Sending to family"],
+  ["bookmarklet", "Saving pages on a computer"],
   ["keys", "Keyboard shortcuts"],
   ["library", "Library"],
   ["install", "Install the app"],
@@ -120,9 +124,64 @@ export default function Help({ inboxEmail, signedIn }) {
             <tr><th>Words per flash</th><td>Show 1 to 5 words at a time. More words per flash suits some readers at high speeds.</td></tr>
             <tr><th>Pivot letter</th><td>Highlights the letter your eye should rest on. Only shown with one word per flash.</td></tr>
             <tr><th>Focus line</th><td>A thin vertical guide through the pivot letter.</td></tr>
+            <tr><th>Context when paused</th><td>When you pause, the surrounding text appears under the word with your place highlighted. Tap any word to carry on from there. Turn it off in Settings.</td></tr>
             <tr><th>Position</th><td>Drag to jump anywhere in the document.</td></tr>
           </tbody>
         </table>
+      </section>
+
+      <section id="pacing">
+        <h2>Pacing and chapters</h2>
+        <h3>Smart pacing</h3>
+        <p>
+          Short, common words like "the" and "of" are recognised almost instantly, so RAFAS shows them a little faster
+          and gives the extra time to long words and numbers. Your average speed stays close to the speed you chose.
+          Turn it off in Settings for a perfectly even rhythm.
+        </p>
+        <h3>Warm-up</h3>
+        <p>
+          When you press Play after a break, RAFAS starts at 70% of your speed and builds up to full speed over about
+          30 seconds. Quick pauses (under 10 seconds) don't restart the warm-up.
+        </p>
+        <h3>Chapters</h3>
+        <p>
+          For books and documents with chapters (EPUBs, PDFs with bookmarks, Word documents with headings, and
+          Markdown or HTML files with headings), the current chapter and the time left in it appear under the
+          controls. Tap it to see all chapters and jump to one.
+        </p>
+      </section>
+
+      <section id="progress">
+        <h2>Progress and family board</h2>
+        <p>
+          <Link to="/progress">Progress</Link> shows how much you've read today and this week, your reading streak
+          (days in a row with some reading), your average speed over the last 30 days, and a chart of the last two
+          weeks. Words count while they're flashing, not when you skip ahead.
+        </p>
+        <p>
+          The <b>family board</b> is optional. If you join it, the others on it can see your words this week, your
+          streak and your average speed, and you can see theirs. Nobody sees what anyone is reading. Leave it any time.
+        </p>
+      </section>
+
+      <section id="sending">
+        <h2>Sending to family</h2>
+        <p>
+          Press <b>Send to…</b> under the reader and pick someone. They get their own copy at the top of their library,
+          starting from the beginning, plus an email letting them know. You can add a short note. Your copy and your
+          place in it don't change.
+        </p>
+      </section>
+
+      <section id="bookmarklet">
+        <h2>Saving pages on a computer</h2>
+        <p>
+          On your <Link to="/account">Account</Link> page, drag the <b>Send to RAFAS</b> button to your browser's
+          bookmarks bar. On any article, click the bookmark: a small RAFAS window opens and saves the page to your
+          library. Because it reads the page you're looking at, it works for articles behind a login or a paywall you
+          have access to. Select some text first to save just that part.
+        </p>
+        <p className="muted small">If nothing happens, allow pop-ups for the site you're on.</p>
       </section>
 
       <section id="keys">

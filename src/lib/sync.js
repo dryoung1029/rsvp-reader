@@ -13,8 +13,8 @@ export async function gunzipText(blob) {
 }
 
 function metaForServer(doc) {
-  const { id, title, source, sourceUrl, wordCount, chars, wordIndex, readWords, positionAt, createdAt, lastOpenedAt } = doc;
-  return { id, title, source, sourceUrl, wordCount, chars, wordIndex, readWords, positionAt, createdAt, lastOpenedAt };
+  const { id, title, source, sourceUrl, wordCount, chars, wordIndex, readWords, positionAt, createdAt, lastOpenedAt, chapters, sharedBy } = doc;
+  return { id, title, source, sourceUrl, wordCount, chars, wordIndex, readWords, positionAt, createdAt, lastOpenedAt, chapters: chapters || [], sharedBy: sharedBy || "" };
 }
 
 export async function uploadDoc(doc) {
@@ -31,7 +31,7 @@ export async function uploadEditedText(id, text, wordCount) {
   const result = await api(`/api/docs/${id}/text?edit=1&words=${wordCount}&chars=${text.length}`, {
     method: "PUT", body: await gzipText(text), headers: { "content-type": "application/gzip" }
   });
-  await updateDoc(id, { textVersion: result.doc.textVersion });
+  await updateDoc(id, { textVersion: result.doc.textVersion, chapters: [] });
 }
 
 export async function downloadText(id) {
@@ -75,6 +75,7 @@ export async function syncLibrary() {
   const localById = new Map(local.map((d) => [d.id, d]));
   const remoteById = new Map(remote.map((d) => [d.id, d]));
   const changedIds = [];
+  const newIds = [];
 
   for (const r of remote) {
     const l = localById.get(r.id);
@@ -83,10 +84,11 @@ export async function syncLibrary() {
         ...r, synced: true, serverPositionAt: r.positionAt, textMissing: true, textVersion: r.textVersion
       });
       changedIds.push(r.id);
+      newIds.push(r.id);
       continue;
     }
     if (l.deleted) continue;
-    const changes = { synced: true, title: r.title, wordCount: r.wordCount, chars: r.chars };
+    const changes = { synced: true, title: r.title, wordCount: r.wordCount, chars: r.chars, chapters: r.chapters || [], sharedBy: r.sharedBy || "" };
     if (r.positionAt > (l.positionAt || 0)) {
       Object.assign(changes, { wordIndex: r.wordIndex, readWords: r.readWords, positionAt: r.positionAt, serverPositionAt: r.positionAt });
       changedIds.push(r.id);
@@ -117,5 +119,5 @@ export async function syncLibrary() {
       await pushPosition(doc).catch(() => {});
     }
   }
-  return { changedIds };
+  return { changedIds, newIds, remote };
 }

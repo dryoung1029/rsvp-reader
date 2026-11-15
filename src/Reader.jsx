@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  clamp, normalizeText, getWords, makeChunks, delayForChunk, pivotIndex,
+  clamp, normalizeText, getWords, makeChunks, delayForChunk, pivotIndex, warmupFactor, countWords,
   firstUrl, formatDuration, formatAgo
 } from "./lib/text.js";
-import { readDocumentFile, ACCEPTED_FILES } from "./lib/parsers.js";
+import { readDocumentFile, htmlWithChapters, ACCEPTED_FILES } from "./lib/parsers.js";
 import {
   listDocs, getDoc, getText, addDoc, updateDoc, putDoc, takeLegacyDocs,
   listPendingShares, deletePendingShare
@@ -11,11 +11,15 @@ import {
 import { syncLibrary, uploadDoc, downloadText, pushPosition, deleteEverywhere, uploadEditedText } from "./lib/sync.js";
 import { chooseFromDropbox, chooseFromGoogleDrive } from "./lib/cloud.js";
 import { api } from "./lib/api.js";
-import { Link } from "./router.jsx";
+import { Link, navigate } from "./router.jsx";
+import { getStatsTracker } from "./lib/stats.js";
+import Sheet from "./components/Sheet.jsx";
+import ContextView from "./components/ContextView.jsx";
 
 const SAMPLE_TEXT = `Welcome to RAFAS. Words appear one at a time in the same spot, so your eyes can stay still. The red letter is the pivot: rest your eyes on it. Tap the middle to pause, or tap the left or right edge to jump back or forward a sentence. Add an article, a PDF, an EPUB, a Word document or some pasted text, and RAFAS will save it to your library and remember your place on every device you sign in on.`;
 
-const SOURCE_LABEL = { paste: "Pasted", url: "Web", link: "Link", file: "File", share: "Shared", inbox: "Inbox", drive: "Google Drive", dropbox: "Dropbox" };
+const SOURCE_LABEL = { paste: "Pasted", url: "Web", link: "Link", file: "File", share: "Shared", inbox: "Inbox", drive: "Google Drive", dropbox: "Dropbox", bookmarklet: "Web" };
+const sourceLabel = (doc) => (doc.sharedBy ? `From ${doc.sharedBy}` : SOURCE_LABEL[doc.source] || "Saved");
 const PUSH_INTERVAL_MS = 8000;
 
 const store = {
@@ -78,12 +82,21 @@ function PivotWord({ text, enabled }) {
   );
 }
 
+// Shrinks long words so they fit on one line instead of wrapping mid-word.
+// Monospace glyphs are about 0.6em wide; cqw is the stage's own width.
+function wordFontSize(text, size, fill) {
+  const chars = Math.max(4, Math.min(40, String(text || "").length));
+  const base = `clamp(${fill ? 40 : 34}px, 12vw, ${size}px)`;
+  return `min(${base}, calc(92cqw / ${(chars * 0.62).toFixed(2)}))`;
+}
+
 // The word display with tap zones: left = previous sentence, middle = play/pause, right = next sentence.
-function Stage({ current, playing, fontSize, pivot, chunkSize, focusLine, dragging, onBack, onToggle, onNext, fill }) {
+function Stage({ current, playing, fontSize, pivot, chunkSize, focusLine, dragging, onBack, onToggle, onNext, fill, context }) {
+  const showContext = Boolean(context) && !playing && !dragging;
   return (
-    <div className={`stage${dragging ? " drop" : ""}${playing ? "" : " paused"}`}>
+    <div className={`stage${dragging ? " drop" : ""}${playing ? "" : " paused"}${showContext ? " with-context" : ""}`}>
       {focusLine && !dragging && <div className="guide" />}
-      <div className="word" style={{ fontSize: fill ? `clamp(40px, 12vw, ${Math.round(fontSize * 1.4)}px)` : `clamp(38px, 12vw, ${fontSize}px)` }}>
+      <div className="word" style={{ fontSize: wordFontSize(current, fill ? Math.round(fontSize * 1.4) : fontSize, fill) }}>
         {dragging ? "Drop file to add it" : <PivotWord text={current} enabled={pivot && chunkSize === 1} />}
       </div>
       {!dragging && (
@@ -93,6 +106,7 @@ function Stage({ current, playing, fontSize, pivot, chunkSize, focusLine, draggi
           <button className="side" aria-label="Next sentence" onClick={onNext}>›</button>
         </div>
       )}
+      {showContext && <ContextView {...context} />}
     </div>
   );
 }
@@ -119,7 +133,7 @@ async function importLink(link, setStatus) {
   return { text, title: data.title || link, kind: "article" };
 }
 
-export default function Reader({ user, config, visible }) {
+export default function Reader({ user, config, visible, path }) {
   const [docs, setDocs] = useState([]);
   const [docId, setDocId] = useState(null);
   const [text, setText] = useState(SAMPLE_TEXT);
@@ -142,6 +156,17 @@ export default function Reader({ user, config, visible }) {
   const [focus, setFocus] = useState(false);
   const [showText, setShowText] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [smartPacing, setSmartPacing] = useState(() => store.get("rsvp:smartPacing") !== "false");
+  const [warmup, setWarmup] = useState(() => store.get("rsvp:warmup") !== "false");
+  const [showContext, setShowContext] = useState(() => store.get("rsvp:context") !== "false");
+  const [chapters, setChapters] = useState([]);
+  const [sheet, setSheet] = useState(null); // "chapters" | "send" | null
+  const [members, setMembers] = useState([]);
+  const [sendNote, setSendNote] = useState("");
+  const [touched, setTouched] = useState(false); // has the reader moved since opening? (context view)
+  const stats = useMemo(() => getStatsTracker(user.id), [user.id]);
+  const rampStartRef = useRef(0);
+  const pausedAtRef = useRef(0);
 
   const words = useMemo(() => getWords(text), [text]);
   const chunks = useMemo(() => makeChunks(words, chunkSize), [words, chunkSize]);
@@ -166,6 +191,9 @@ export default function Reader({ user, config, visible }) {
   useEffect(() => { store.set("rsvp:fontSize", String(fontSize)); }, [fontSize]);
   useEffect(() => { store.set("rsvp:pivot", String(pivot)); }, [pivot]);
   useEffect(() => { store.set("rsvp:focusLine", String(focusLine)); }, [focusLine]);
+  useEffect(() => { store.set("rsvp:smartPacing", String(smartPacing)); }, [smartPacing]);
+  useEffect(() => { store.set("rsvp:warmup", String(warmup)); }, [warmup]);
+  useEffect(() => { store.set("rsvp:context", String(showContext)); }, [showContext]);
   useEffect(() => { if (docId) store.set(lastDocKey, docId); }, [docId, lastDocKey]);
   useEffect(() => { if (!visible) { setPlaying(false); setFocus(false); } }, [visible]);
 
@@ -231,6 +259,8 @@ export default function Reader({ user, config, visible }) {
     setText(body);
     setTitle(meta.title);
     setDocId(meta.id);
+    setChapters(Array.isArray(meta.chapters) ? meta.chapters : []);
+    setTouched(Boolean(meta.wordIndex));
     setIndex(Math.floor((meta.wordIndex || 0) / chunkSize));
     positionRef.current = { docId: meta.id, wordIndex: meta.wordIndex || 0, readWords: meta.readWords || 0 };
     savedRef.current = { docId: meta.id, wordIndex: meta.wordIndex || 0 };
@@ -245,6 +275,7 @@ export default function Reader({ user, config, visible }) {
       setStatus(`Downloading "${meta.title}"...`);
       try {
         body = await downloadText(id);
+        setStatus((prev) => (prev.startsWith("Downloading") ? "" : prev));
       } catch (error) {
         setStatus(`Couldn't download "${meta.title}": ${error.message}`);
         if (typeof body !== "string") return;
@@ -259,10 +290,12 @@ export default function Reader({ user, config, visible }) {
     if (!quiet) window.scrollTo({ top: 0, behavior: "smooth" });
   }, [flushPosition, loadIntoReader, refreshDocs]);
 
-  const saveAndOpen = useCallback(async ({ text: raw, title: newTitle, source, sourceUrl }) => {
+  const saveAndOpen = useCallback(async ({ text: raw, title: newTitle, source, sourceUrl, chapters: marks }) => {
     const clean = normalizeText(raw);
     if (!clean) throw new Error("No readable text found. The file may be copy-protected or image-only.");
-    const doc = await addDoc({ title: newTitle || titleFromText(clean), text: clean, source, sourceUrl, wordCount: clean.split(" ").length });
+    const wordCount = clean.split(" ").length;
+    const validMarks = Array.isArray(marks) ? marks.filter((c) => c.w >= 0 && c.w < wordCount) : [];
+    const doc = await addDoc({ title: newTitle || titleFromText(clean), text: clean, source, sourceUrl, wordCount, chapters: validMarks });
     await openDoc(doc.id, { quiet: true });
     if (!doc.synced) uploadDoc(doc).then(refreshDocs).catch((error) => console.warn("Upload will retry on next sync", error));
     return doc;
@@ -272,14 +305,14 @@ export default function Reader({ user, config, visible }) {
   const importItem = useCallback(async (item, source) => {
     if (item.kind === "file") {
       const parsed = await readDocumentFile(item.blob, setStatus, item.name);
-      return await saveAndOpen({ text: parsed.text, title: item.title || parsed.title, source });
+      return await saveAndOpen({ text: parsed.text, title: item.title || parsed.title, source, chapters: parsed.chapters });
     }
     const link = item.kind === "url" ? item.url : sharedUrl(item);
     if (link) {
       setStatus(`Importing ${link}...`);
       try {
         const result = await importLink(link, setStatus);
-        return await saveAndOpen({ text: result.text, title: item.title || result.title, source, sourceUrl: link });
+        return await saveAndOpen({ text: result.text, title: item.title || result.title, source, sourceUrl: link, chapters: result.chapters });
       } catch (error) {
         if (getWords(item.text).length > 40) return await saveAndOpen({ text: item.text, title: item.title, source });
         throw error;
@@ -336,8 +369,9 @@ export default function Reader({ user, config, visible }) {
     syncingRef.current = true;
     try {
       await flushPosition({ push: true });
-      const { changedIds } = await syncLibrary();
+      const { changedIds, newIds } = await syncLibrary();
       const list = await refreshDocs();
+      const gifts = list.filter((d) => newIds.includes(d.id) && d.sharedBy && !d.wordIndex);
       const openId = docIdRef.current;
       if (openId && changedIds.includes(openId) && !playingRef.current) {
         const meta = list.find((d) => d.id === openId);
@@ -354,7 +388,9 @@ export default function Reader({ user, config, visible }) {
       } else if (!openId && list[0]) {
         await openDoc(list[0].id, { quiet: true });
       }
-      if (!quiet) setStatus("Library is up to date.");
+      if (gifts.length === 1) setStatus(`${gifts[0].sharedBy} sent you "${gifts[0].title}". It's at the top of your library.`);
+      else if (gifts.length > 1) setStatus(`You have ${gifts.length} new documents from family in your library.`);
+      if (!quiet && !gifts.length) setStatus("Library is up to date.");
     } catch (error) {
       if (!quiet || error.status !== 0) console.warn("Sync failed", error);
       if (!quiet) setStatus(`Sync: ${error.message}`);
@@ -397,6 +433,8 @@ export default function Reader({ user, config, visible }) {
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         setPlaying(false);
+        stats.stop();
+        stats.flush({ keepalive: true });
         flushPosition({ push: true, keepalive: true });
       } else {
         runSync();
@@ -413,7 +451,7 @@ export default function Reader({ user, config, visible }) {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("online", onOnline);
     };
-  }, [ready, flushPosition, runSync, syncInbox]);
+  }, [ready, flushPosition, runSync, syncInbox, stats]);
 
   useEffect(() => {
     const show = () => requestAnimationFrame(() => {
@@ -433,9 +471,31 @@ export default function Reader({ user, config, visible }) {
       setPlaying(false);
       return undefined;
     }
-    const timer = setTimeout(() => setIndex((old) => clamp(old + 1, 0, maxIndex)), delayForChunk(current, wpm));
+    const speedFactor = warmup ? warmupFactor(Date.now() - rampStartRef.current) : 1;
+    const delay = delayForChunk(current, wpm, { smart: smartPacing, speedFactor });
+    const shown = countWords(current);
+    const timer = setTimeout(() => {
+      stats.addWords(shown);
+      setIndex((old) => clamp(old + 1, 0, maxIndex));
+    }, delay);
     return () => clearTimeout(timer);
-  }, [playing, index, maxIndex, current, wpm, chunks.length]);
+  }, [playing, index, maxIndex, current, wpm, chunks.length, smartPacing, warmup, stats]);
+
+  // Reading time for stats, and the warm-up ramp: a pause of more than
+  // 10 seconds restarts the warm-up; a quick pause doesn't.
+  useEffect(() => {
+    if (playing) {
+      setTouched(true);
+      if (Date.now() - pausedAtRef.current > 10000) rampStartRef.current = Date.now();
+      stats.start();
+      const interval = setInterval(() => stats.flush(), 60000);
+      return () => clearInterval(interval);
+    }
+    pausedAtRef.current = Date.now();
+    stats.stop();
+    stats.flush();
+    return undefined;
+  }, [playing, stats]);
 
   // Keep the screen awake while words are flashing.
   useEffect(() => {
@@ -479,6 +539,7 @@ export default function Reader({ user, config, visible }) {
     if (!visible) return undefined;
     function onKeyDown(event) {
       const tag = event.target?.tagName;
+      if (sheet) return;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || event.metaKey || event.ctrlKey || event.altKey) return;
       const key = event.key;
       if (event.code === "Space") { event.preventDefault(); togglePlay(); }
@@ -492,7 +553,7 @@ export default function Reader({ user, config, visible }) {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [visible, maxIndex, focus, togglePlay, backSentence, nextSentence, enterFocus, exitFocus]);
+  }, [visible, sheet, maxIndex, focus, togglePlay, backSentence, nextSentence, enterFocus, exitFocus]);
 
   function changeChunkSize(next) {
     const wordIndex = index * chunkSize;
@@ -512,7 +573,7 @@ export default function Reader({ user, config, visible }) {
 
   const handleFile = (file) => file && run(async () => {
     const parsed = await readDocumentFile(file, setStatus);
-    await saveAndOpen({ text: parsed.text, title: parsed.title, source: "file" });
+    await saveAndOpen({ text: parsed.text, title: parsed.title, source: "file", chapters: parsed.chapters });
     setStatus(`Saved "${parsed.title}" to your library.`);
   });
 
@@ -524,7 +585,7 @@ export default function Reader({ user, config, visible }) {
       setStatus("Importing...");
       try {
         const result = await importLink(target, setStatus);
-        await saveAndOpen({ text: result.text, title: result.title, source: result.kind === "file" ? "link" : "url", sourceUrl: target });
+        await saveAndOpen({ text: result.text, title: result.title, source: result.kind === "file" ? "link" : "url", sourceUrl: target, chapters: result.chapters });
         setUrl("");
         setStatus(`Saved "${result.title}" to your library.`);
       } catch (error) {
@@ -567,7 +628,7 @@ export default function Reader({ user, config, visible }) {
     } catch {
       parsed = await importLink(picked.url, setStatus); // fall back to fetching through the server
     }
-    await saveAndOpen({ text: parsed.text, title: parsed.title || picked.name, source: "dropbox" });
+    await saveAndOpen({ text: parsed.text, title: parsed.title || picked.name, source: "dropbox", chapters: parsed.chapters });
     setStatus(`Saved "${parsed.title || picked.name}" from Dropbox.`);
   });
 
@@ -575,7 +636,7 @@ export default function Reader({ user, config, visible }) {
     const picked = await chooseFromGoogleDrive(config.google);
     if (!picked) return;
     const parsed = await readDocumentFile(picked.blob, setStatus, picked.name);
-    await saveAndOpen({ text: parsed.text, title: picked.title || parsed.title, source: "drive" });
+    await saveAndOpen({ text: parsed.text, title: picked.title || parsed.title, source: "drive", chapters: parsed.chapters });
     setStatus(`Saved "${picked.title}" from Google Drive.`);
   });
 
@@ -618,12 +679,101 @@ export default function Reader({ user, config, visible }) {
     return q ? docs.filter((d) => d.title.toLowerCase().includes(q)) : docs;
   }, [docs, libraryQuery]);
 
+  // ---------- Chapters ----------
+  const wordIndex = index * chunkSize;
+  const chapterInfo = useMemo(() => {
+    if (!chapters.length) return null;
+    let i = -1;
+    for (let k = 0; k < chapters.length; k += 1) if (chapters[k].w <= wordIndex) i = k;
+    if (i < 0) return { title: "Before chapter 1", index: -1, end: chapters[0].w, start: 0 };
+    return { title: chapters[i].t, index: i, start: chapters[i].w, end: chapters[i + 1]?.w ?? words.length };
+  }, [chapters, wordIndex, words.length]);
+
+  function jumpTo(word) {
+    setIndex(clamp(Math.floor(word / chunkSize), 0, maxIndex));
+    setTouched(true);
+  }
+
+  // ---------- Send to a family member ----------
+  useEffect(() => {
+    api("/api/members").then((r) => setMembers(r.members)).catch(() => setMembers([]));
+  }, []);
+
+  async function sendTo(member) {
+    const doc = await getDoc(docId);
+    if (!doc) return;
+    try {
+      setBusy(true);
+      if (!doc.synced) await uploadDoc(doc);
+      await api(`/api/docs/${doc.id}/send`, { method: "POST", body: { to: member.id, note: sendNote } });
+      setSheet(null);
+      setSendNote("");
+      setStatus(`Sent "${doc.title}" to ${member.name}.`);
+    } catch (error) {
+      setStatus(`Couldn't send it: ${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- Bookmarklet: /add?url=…&title=… ----------
+  // The bookmarklet opens this page in a small window and, once we say we're
+  // ready, posts the page it was clicked on. That way pages behind a login or
+  // paywall still work. Without that message, the link is fetched by the server.
+  const addHandledRef = useRef(false);
+  useEffect(() => {
+    if (!ready || path !== "/add" || addHandledRef.current) return;
+    addHandledRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const link = params.get("url") || "";
+    const titleHint = params.get("title") || "";
+    const fromOpener = params.get("via") === "bookmarklet" && window.opener;
+    navigate("/", { replace: true });
+    run(async () => {
+      setStatus("Saving the page...");
+      let page = null;
+      if (fromOpener) {
+        page = await new Promise((resolve) => {
+          const timer = setTimeout(() => { window.removeEventListener("message", onMessage); resolve(null); }, 4000);
+          function onMessage(event) {
+            if (event.source !== window.opener || event.data?.type !== "rafas-page") return;
+            clearTimeout(timer);
+            window.removeEventListener("message", onMessage);
+            resolve(event.data);
+          }
+          window.addEventListener("message", onMessage);
+          window.opener.postMessage({ type: "rafas-ready" }, "*");
+        });
+      }
+      let result = null;
+      if (page?.selection && countWords(page.selection) >= 40) {
+        result = { text: page.selection, title: page.title || titleHint };
+      } else if (page?.html) {
+        const { Readability } = await import("@mozilla/readability");
+        const doc = new DOMParser().parseFromString(page.html, "text/html");
+        const article = new Readability(doc).parse();
+        const parsed = article?.content ? htmlWithChapters(article.content) : null;
+        if (parsed && countWords(parsed.text) > 30) result = { ...parsed, title: article.title || page.title || titleHint };
+      }
+      if (!result) {
+        if (!/^https?:\/\//i.test(link)) throw new Error("Nothing to save from that page.");
+        result = await importLink(link, setStatus);
+        result.title = result.kind === "article" && titleHint ? titleHint : result.title;
+      }
+      await saveAndOpen({ text: result.text, title: result.title, source: "bookmarklet", sourceUrl: link, chapters: result.chapters });
+      setStatus(`Saved "${result.title}" to your library.${fromOpener ? " You can close this window, or start reading here." : ""}`);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, path]);
+
   if (!visible) return null;
 
   const stageProps = {
     current, playing, fontSize, pivot, chunkSize, focusLine, dragging,
-    onBack: backSentence, onToggle: togglePlay, onNext: nextSentence
+    onBack: backSentence, onToggle: togglePlay, onNext: nextSentence,
+    context: showContext && touched && words.length > 1 ? { words, wordIndex, chunkSize, onJump: jumpTo } : null
   };
+  const chapterMinutes = chapterInfo ? (chapterInfo.end - wordIndex) / wpm : 0;
 
   return (
     <>
@@ -643,6 +793,17 @@ export default function Reader({ user, config, visible }) {
               <button className="btn" onClick={nextSentence} title="Next sentence (Shift+→)" aria-label="Next sentence"><span className="ico" aria-hidden="true">»</span><span className="lbl">Next</span></button>
               <button className="btn" onClick={enterFocus} title="Full-screen reading (F)" aria-label="Focus mode"><span className="ico" aria-hidden="true">⛶</span><span className="lbl">Focus</span></button>
             </div>
+            {(chapterInfo || (docId && members.length > 0)) && (
+              <div className="doc-tools">
+                {chapterInfo && (
+                  <button className="chapter-btn" onClick={() => setSheet("chapters")} title="Chapters">
+                    <span className="chapter-name">{chapterInfo.title}</span>
+                    <span className="muted"> · {formatDuration(chapterMinutes)} left in chapter</span>
+                  </button>
+                )}
+                {docId && members.length > 0 && <button className="btn sm" onClick={() => setSheet("send")}>Send to…</button>}
+              </div>
+            )}
             {status && <div className="status" role="status">{status}</div>}
           </section>
         </div>
@@ -663,7 +824,7 @@ export default function Reader({ user, config, visible }) {
                   <button className="doc-open" onClick={() => openDoc(doc.id)} title={doc.title}>
                     <div className="doc-title">{doc.title}</div>
                     <div className="doc-meta">
-                      {pct >= 100 ? "Finished" : `${pct}% · ${formatDuration(left)} left`} · {SOURCE_LABEL[doc.source] || "Saved"} · {formatAgo(doc.lastOpenedAt)}
+                      {pct >= 100 ? "Finished" : `${pct}% · ${formatDuration(left)} left`} · {sourceLabel(doc)} · {formatAgo(doc.lastOpenedAt)}
                       {!doc.synced && <span title="Not yet saved to your account. It will upload when you're online."> · not synced</span>}
                     </div>
                     <div className="bar"><div style={{ width: `${pct}%` }} /></div>
@@ -712,6 +873,9 @@ export default function Reader({ user, config, visible }) {
               <label className="slider">Position: {chunks.length ? index + 1 : 0} of {chunks.length}<input type="range" min="0" max={maxIndex} step="1" value={index} onChange={(e) => setIndex(Number(e.target.value))} /></label>
               <label className="toggle">Pivot letter <input type="checkbox" checked={pivot} disabled={chunkSize !== 1} onChange={(e) => setPivot(e.target.checked)} /></label>
               <label className="toggle">Focus line <input type="checkbox" checked={focusLine} onChange={(e) => setFocusLine(e.target.checked)} /></label>
+              <label className="toggle"><span>Smart pacing<span className="toggle-hint">More time on long words and numbers, less on short common ones</span></span><input type="checkbox" checked={smartPacing} onChange={(e) => setSmartPacing(e.target.checked)} /></label>
+              <label className="toggle"><span>Warm-up<span className="toggle-hint">Start at 70% speed and build up over 30 seconds</span></span><input type="checkbox" checked={warmup} onChange={(e) => setWarmup(e.target.checked)} /></label>
+              <label className="toggle"><span>Show context when paused<span className="toggle-hint">The surrounding text, so you can find your place</span></span><input type="checkbox" checked={showContext} onChange={(e) => setShowContext(e.target.checked)} /></label>
               <div className="muted small kbd-only">
                 <kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> word · <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> sentence · <kbd>↑</kbd><kbd>↓</kbd> speed · <kbd>F</kbd> focus · <Link to="/help#keys">all shortcuts</Link>
               </div>
@@ -725,11 +889,45 @@ export default function Reader({ user, config, visible }) {
         <div className="focus" role="dialog" aria-label="Focus reading">
           <div className="bar"><div style={{ width: `${progress}%` }} /></div>
           <div className="focus-bar">
-            <span>{progress}% · {formatDuration(minutesLeft)} left · {wpm} wpm</span>
+            <span>{chapterInfo ? `${chapterInfo.title} · ` : ""}{progress}% · {formatDuration(minutesLeft)} left · {wpm} wpm</span>
             <button className="btn sm" onClick={exitFocus} aria-label="Leave focus mode">✕</button>
           </div>
           <Stage {...stageProps} fill />
         </div>
+      )}
+
+      {sheet === "chapters" && chapters.length > 0 && (
+        <Sheet title="Chapters" onClose={() => setSheet(null)}>
+          <ol className="chapter-list">
+            {chapters.map((c, i) => {
+              const end = chapters[i + 1]?.w ?? words.length;
+              const done = wordIndex >= end;
+              const isCurrent = chapterInfo?.index === i;
+              return (
+                <li key={`${c.w}-${i}`}>
+                  <button className={`chapter-item${isCurrent ? " current" : ""}`} onClick={() => { jumpTo(c.w); setSheet(null); }}>
+                    <span className="chapter-title">{c.t || `Chapter ${i + 1}`}</span>
+                    <span className="muted small">{done ? "Read" : isCurrent ? `${formatDuration((end - wordIndex) / wpm)} left` : formatDuration((end - c.w) / wpm)}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </Sheet>
+      )}
+
+      {sheet === "send" && (
+        <Sheet title={`Send "${title}"`} onClose={() => setSheet(null)}>
+          <p className="muted small">They get their own copy at the top of their library, starting from the beginning, and an email to let them know.</p>
+          <input className="field" value={sendNote} onChange={(e) => setSendNote(e.target.value)} placeholder="Add a note (optional)" maxLength={300} />
+          <div className="member-list">
+            {members.map((m) => (
+              <button key={m.id} className="btn" disabled={busy} onClick={() => sendTo(m)}>
+                <span className="avatar small" aria-hidden="true">{(m.name || "?")[0].toUpperCase()}</span> {m.name}
+              </button>
+            ))}
+          </div>
+        </Sheet>
       )}
     </>
   );

@@ -13,6 +13,11 @@ Live at **https://rafas.app** (Cloudflare Workers).
 - Phone layout with tap zones and full-screen focus mode; computer layout with a library sidebar, drag-and-drop and keyboard shortcuts.
 - Installable PWA that appears in the Android Share menu.
 - Personal inbox per member: email from your sign-in address, or an iPhone Shortcut with a personal token.
+- Reading stats (words, time, streaks, average speed, 14-day chart) and an opt-in family board.
+- Context view when paused; chapters for EPUB, PDF bookmarks, Word headings, and Markdown/HTML headings.
+- Smart pacing (time spent on long words, not short common ones) and a 30-second warm-up.
+- Send a document to another member, with an email notice.
+- "Send to RAFAS" bookmarklet for saving pages on a computer, including pages behind a login.
 
 ## Layout
 
@@ -21,7 +26,7 @@ Live at **https://rafas.app** (Cloudflare Workers).
 | `src/` | React frontend (Vite). `App.jsx` holds the reader; `pages/` has About, Help, Privacy. |
 | `src/lib/` | Text helpers, file parsers (PDF, EPUB, OCR), IndexedDB library. |
 | `public/` | Manifest, icons, service worker (`sw.js`). |
-| `worker/` | Cloudflare Worker. `auth.js` (sign-in, sessions, invites, admin), `docs.js` (library sync), `inbox.js`, `importer.js` (links and share links), `index.js` (router and email handler). |
+| `worker/` | Cloudflare Worker. `auth.js` (sign-in, sessions, invites, admin), `docs.js` (library sync, sending), `stats.js`, `inbox.js`, `importer.js` (links and share links), `index.js` (router and email handler). |
 | `migrations/` | D1 database schema. |
 | `wrangler.jsonc` | Worker config: static assets, D1, KV, custom domain, public settings. |
 
