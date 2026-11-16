@@ -7,6 +7,7 @@ const SECTIONS = [
   ["adding", "Adding documents"],
   ["cloud", "Google Drive, Dropbox, iCloud"],
   ["reading", "Reading controls"],
+  ["finding", "Finding a place and goals"],
   ["pacing", "Pacing and chapters"],
   ["progress", "Progress and family"],
   ["achievements", "Achievements, levels and competitions"],
@@ -130,6 +131,23 @@ export default function Help({ inboxEmail, signedIn }) {
             <tr><th>Position</th><td>Drag to jump anywhere in the document.</td></tr>
           </tbody>
         </table>
+      </section>
+
+      <section id="finding">
+        <h2>Finding a place, and reading goals</h2>
+        <h3>Find</h3>
+        <p>Tap <b>Find</b> under the reader (or press <kbd>/</kbd> on a computer).</p>
+        <ul>
+          <li><b>Search</b>: type a word or phrase and tap a match to read from there. The last word can be just the start of a word, so “photo” finds “photosynthesis”. Put the search in quotes for whole words only. After a search, ‹ and › under the reader step through the matches.</li>
+          <li><b>Contents</b>: chapters from the book's table of contents (EPUB), PDF bookmarks, Word headings, or headings in a web page. For other documents RAFAS looks for headings such as “Chapter 3”, “Part Two” or “Epilogue” in the text. Tap the chapter name under the reader to open this list straight away.</li>
+          <li><b>Position</b>: pick a percentage and see the text there before you jump.</li>
+        </ul>
+        <h3>Goal</h3>
+        <p>
+          Tap <b>Goal</b> to choose how much to read this session: to the end of this chapter (or the next one), a number of
+          words, or a number of minutes. Your progress shows under the reader, and RAFAS pauses when you get there. Word and
+          time goals finish the sentence you're on. Only time spent reading counts toward a time goal. Tap ✕ to cancel a goal.
+        </p>
       </section>
 
       <section id="pacing">
@@ -256,6 +274,7 @@ export default function Help({ inboxEmail, signedIn }) {
             <tr><th><kbd>F</kbd></th><td>Enter or leave focus mode</td></tr>
             <tr><th><kbd>Esc</kbd></th><td>Leave focus mode</td></tr>
             <tr><th><kbd>R</kbd></th><td>Back to the beginning</td></tr>
+            <tr><th><kbd>/</kbd> or <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd></th><td>Search this document</td></tr>
           </tbody>
         </table>
       </section>
