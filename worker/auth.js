@@ -215,7 +215,8 @@ async function completeSignIn(request, env, row, nameFromForm) {
     const id = crypto.randomUUID();
     const name = cleanName(nameFromForm) || row.name || row.email.split("@")[0];
     await env.DB.prepare(
-      "INSERT INTO users (id, email, name, is_admin, invite_code, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      // share_stats = 1: progress is visible to the family by default (opt out on the Progress page).
+      "INSERT INTO users (id, email, name, is_admin, invite_code, created_at, last_seen_at, share_stats) VALUES (?, ?, ?, ?, ?, ?, ?, 1)"
     ).bind(id, row.email, name, isAdmin ? 1 : 0, row.invite_code, now, now).run();
     user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
   } else if (!user.is_admin && adminEmails(env).includes(user.email)) {

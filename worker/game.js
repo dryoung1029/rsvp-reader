@@ -177,8 +177,50 @@ async function monthStandings(env, month) {
   return { words: rows(words), days: rows(days), speed: rows(speed), finished: rows(finished), members: people.results.length };
 }
 
+// Counted (quiz-checked) reading for a family member's profile: last 14 days,
+// today, this week and average speed. Never what they read.
+async function countedSummary(env, userId, today) {
+  const { results } = await env.DB.prepare(
+    "SELECT day, verified_words AS words, verified_ms AS ms FROM reading_days WHERE user_id = ? AND day >= ? ORDER BY day"
+  ).bind(userId, shiftDay(today, -29)).all();
+  const byDay = new Map(results.map((r) => [r.day, r]));
+  const days = [];
+  for (let i = 13; i >= 0; i -= 1) {
+    const day = shiftDay(today, -i);
+    days.push({ day, words: byDay.get(day)?.words || 0, ms: byDay.get(day)?.ms || 0 });
+  }
+  const sum = (from) => results.filter((r) => r.day >= from).reduce((a, r) => ({ words: a.words + r.words, ms: a.ms + r.ms }), { words: 0, ms: 0 });
+  const week = sum(shiftDay(today, -6));
+  const month = sum(shiftDay(today, -29));
+  const last = await env.DB.prepare(
+    "SELECT (SELECT MAX(ended_at) FROM reading_sessions WHERE user_id = ?1) AS t, (SELECT MAX(day) FROM reading_days WHERE user_id = ?1 AND words > 0) AS d"
+  ).bind(userId).first();
+  return {
+    days,
+    today: byDay.get(today)?.words || 0,
+    week: week.words,
+    avgWpm: month.ms > 60000 ? Math.round(month.words / (month.ms / 60000)) : 0,
+    lastReadAt: last?.t || null,
+    lastReadDay: last?.d || null
+  };
+}
+
+async function memberCard(env, person, viewerId, today, competition) {
+  const prof = await profileFor(env, person.id, today, competition);
+  const counted = await countedSummary(env, person.id, today);
+  return {
+    id: person.id, name: person.name, isYou: person.id === viewerId,
+    level: prof.level, points: prof.points, achievements: prof.unlocked.length,
+    streak: prof.ctx.streak, bestStreak: prof.ctx.bestStreak, totalWords: prof.ctx.totalWords,
+    wins: prof.ctx.wins, topSpeed: prof.ctx.bestWpm[1000] || prof.ctx.bestWpm[500] || 0,
+    todayWords: counted.today, weekWords: counted.week, avgWpm: counted.avgWpm, lastReadAt: counted.lastReadAt, lastReadDay: counted.lastReadDay,
+    _prof: prof, _counted: counted
+  };
+}
+
 export async function handleGame(request, env, pathname) {
-  if (!["/api/achievements", "/api/achievements/check", "/api/compete", "/api/leaderboards"].includes(pathname)) return null;
+  const familyMatch = pathname.match(/^\/api\/family(?:\/([0-9a-f-]{36}))?$/);
+  if (!["/api/achievements", "/api/achievements/check", "/api/compete", "/api/leaderboards"].includes(pathname) && !familyMatch) return null;
   const user = await requireUser(request, env);
   const today = todayFrom(request);
 
@@ -237,6 +279,33 @@ export async function handleGame(request, env, pathname) {
       history,
       feed: feed.filter((f) => ACHIEVEMENTS_BY_ID[f.id]).map((f) => ({ ...f, isYou: f.user_id === user.id }))
     });
+  }
+
+  // Family: everyone who shares their progress, and one person's full profile.
+  if (familyMatch && request.method === "GET") {
+    const competition = await pastCompetitionResults(env, today.slice(0, 7));
+    if (familyMatch[1]) {
+      const person = await env.DB.prepare("SELECT id, name, share_stats, created_at FROM users WHERE id = ?").bind(familyMatch[1]).first();
+      if (!person || !person.share_stats) throw new HttpError(404, "That person's progress isn't shared.");
+      const card = await memberCard(env, person, user.id, today, competition);
+      const { _prof, _counted, ...rest } = card;
+      return json({
+        member: {
+          ...rest,
+          joinedAt: person.created_at,
+          days: _counted.days,
+          unlocked: _prof.unlocked.map((r) => ({ id: r.id, at: r.unlocked_at })).sort((a, b) => b.at - a.at)
+        }
+      });
+    }
+    const { results: people } = await env.DB.prepare("SELECT id, name FROM users WHERE share_stats = 1 ORDER BY name COLLATE NOCASE").all();
+    const members = [];
+    for (const p of people) {
+      const { _prof, _counted, ...rest } = await memberCard(env, p, user.id, today, competition);
+      members.push(rest);
+    }
+    members.sort((a, b) => (b.isYou - a.isYou) || b.weekWords - a.weekWords);
+    return json({ optedIn: true, members });
   }
 
   if (pathname === "/api/leaderboards" && request.method === "GET") {

@@ -5,11 +5,13 @@ import { localDay, formatAgo } from "../lib/text.js";
 import { Link } from "../router.jsx";
 import { ACHIEVEMENTS, ACHIEVEMENTS_BY_ID, TOTAL_POINTS, tierFor } from "../../shared/achievements.js";
 
+// [key, label, path, short label for narrow screens]
 const TABS = [
-  ["overview", "Overview", "/progress"],
-  ["achievements", "Achievements", "/progress/achievements"],
+  ["overview", "Overview", "/progress", "You"],
+  ["achievements", "Achievements", "/progress/achievements", "Badges"],
+  ["family", "Family", "/progress/family"],
   ["compete", "Compete", "/progress/compete"],
-  ["leaderboards", "Leaderboards", "/progress/leaderboards"]
+  ["leaderboards", "Leaders", "/progress/leaderboards"]
 ];
 const GOAL_PRESETS = [1000, 2500, 5000, 10000];
 
@@ -254,12 +256,12 @@ function Achievements({ game }) {
 function JoinBoard({ onJoin }) {
   return (
     <section className="panel">
-      <h2>Join the family board</h2>
+      <h2>Share your progress</h2>
       <p className="muted">
-        Monthly competitions and leaderboards are for people on the family board. Joining shares your totals
-        (words, streaks, speed, level and achievements) with others on the board. Never what you're reading.
+        Family progress, competitions and leaderboards are for people who share their progress. Sharing shows your
+        level, achievements, streaks, speed and how much you've read. Never what you're reading.
       </p>
-      <div><button className="btn primary" onClick={onJoin}>Join the family board</button></div>
+      <div><button className="btn primary" onClick={onJoin}>Share my progress</button></div>
     </section>
   );
 }
@@ -297,7 +299,7 @@ function Compete({ data, user }) {
           <h2>{monthName(data.month)}</h2>
         </div>
         <div className="countdown"><span className="big-num">{data.daysLeft}</span> <span className="muted">{data.daysLeft === 1 ? "day" : "days"} left</span></div>
-        <p className="muted small">Only reading that passed a quick check counts. Whoever reads the most words this month is champion. The top 3 earn a podium achievement. Every member of the family board takes part.</p>
+        <p className="muted small">Only reading that passed a quick check counts. Whoever reads the most words this month is champion. The top 3 earn a podium achievement. Everyone sharing their progress takes part.</p>
       </section>
       <div className="compete-grid">
         {CATEGORIES.map(([key, label, format, hint]) => (
@@ -383,11 +385,103 @@ function Leaderboards({ data }) {
   );
 }
 
-export default function Progress({ user, setUser, tab }) {
+function Avatar({ name, size }) {
+  return <span className={`avatar${size === "lg" ? " lg" : ""}`} aria-hidden="true">{(name || "?").trim()[0].toUpperCase()}</span>;
+}
+
+function lastRead(m) {
+  if (m.lastReadAt) return `Read ${formatAgo(m.lastReadAt)}`;
+  if (!m.lastReadDay) return "Hasn't read yet";
+  if (m.lastReadDay === localDay()) return "Read today";
+  const days = Math.round((Date.parse(localDay()) - Date.parse(m.lastReadDay)) / 86400000);
+  return days === 1 ? "Read yesterday" : `Read ${days} days ago`;
+}
+
+function FamilyList({ data }) {
+  if (!data) return <p className="muted">Loading...</p>;
+  return (
+    <div className="family-grid">
+      {data.members.map((m) => (
+        <Link key={m.id} to={`/progress/family/${m.id}`} className={`member-card${m.isYou ? " you" : ""}`}>
+          <div className="member-head">
+            <Avatar name={m.name} />
+            <div className="member-name">
+              <b>{m.name}</b>{m.isYou && <span className="pill">you</span>}
+              <div className="muted small">Lv {m.level.level} {m.level.title} · {lastRead(m)}</div>
+            </div>
+          </div>
+          <Meter value={m.level.xp - m.level.floor} max={m.level.next - m.level.floor} label={`${m.name} level progress`} />
+          <div className="member-stats">
+            <div><span className="ms-val">{m.weekWords.toLocaleString()}</span><span className="ms-lbl">words this week</span></div>
+            <div><span className="ms-val">{m.streak ? `🔥 ${m.streak}` : "–"}</span><span className="ms-lbl">day streak</span></div>
+            <div><span className="ms-val">{m.avgWpm || "–"}</span><span className="ms-lbl">avg wpm</span></div>
+            <div><span className="ms-val">{m.achievements}</span><span className="ms-lbl">achievements</span></div>
+          </div>
+        </Link>
+      ))}
+      {data.members.length < 2 && <div className="muted small">Nobody else is sharing yet. Invite family from your Account page.</div>}
+    </div>
+  );
+}
+
+function MemberProfile({ id }) {
+  const [m, setM] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => { api(`/api/family/${id}?today=${localDay()}`).then((r) => setM(r.member)).catch((e) => setError(e.message)); }, [id]);
+  if (error) return <p className="error">{error}</p>;
+  if (!m) return <p className="muted">Loading...</p>;
+  const unlocked = new Map(m.unlocked.map((u) => [u.id, u.at]));
+  return (
+    <>
+      <div><Link to="/progress/family" className="small">← Family</Link></div>
+      <section className="panel profile-head">
+        <Avatar name={m.name} size="lg" />
+        <div className="level-info">
+          <div className="level-title">{m.name}{m.isYou && <span className="pill">you</span>}</div>
+          <div className="muted small">Level {m.level.level} {m.level.title} · {m.points} achievement points · {lastRead(m)}</div>
+          <Meter value={m.level.xp - m.level.floor} max={m.level.next - m.level.floor} label="Level progress" />
+        </div>
+      </section>
+      <div className="tiles">
+        <Tile label="Today" value={m.todayWords.toLocaleString()} sub="words counted" />
+        <Tile label="Streak" value={`${m.streak} ${m.streak === 1 ? "day" : "days"}`} sub={`Best: ${m.bestStreak} days`} />
+        <Tile label="This week" value={m.weekWords.toLocaleString()} sub="words counted" />
+        <Tile label="Average speed" value={m.avgWpm || "–"} sub={m.topSpeed ? `Top: ${m.topSpeed} wpm` : "words per minute"} />
+      </div>
+      <section className="panel">
+        <h2>Words per day</h2>
+        <DayChart days={m.days} goal={0} />
+        <div className="muted small">All time: {m.totalWords.toLocaleString()} words counted{m.wins ? ` · ${m.wins} monthly ${m.wins === 1 ? "title" : "titles"} 🏆` : ""}.</div>
+      </section>
+      <section className="panel">
+        <h2>Achievements <span className="muted small">({unlocked.size} of {ACHIEVEMENTS.length})</span></h2>
+        <div className="ach-grid">
+          {ACHIEVEMENTS.filter((a) => unlocked.has(a.id) || !a.secret).map((a) => {
+            const at = unlocked.get(a.id);
+            return (
+              <div key={a.id} className={`ach${at ? "" : " locked"}`}>
+                <Badge achievement={a} locked={!at} />
+                <div className="ach-body">
+                  <div className="ach-title">{a.title}</div>
+                  <div className="ach-desc">{a.desc}</div>
+                  {at && <div className="ach-prog">Unlocked {new Date(at).toLocaleDateString()}</div>}
+                </div>
+                <div className="ach-points">{a.points}</div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </>
+  );
+}
+
+export default function Progress({ user, setUser, tab, memberId }) {
   const [stats, setStats] = useState(null);
   const [game, setGame] = useState(null);
   const [compete, setCompete] = useState(null);
   const [leaders, setLeaders] = useState(null);
+  const [family, setFamily] = useState(null);
   const [error, setError] = useState("");
   const today = localDay();
 
@@ -403,7 +497,8 @@ export default function Progress({ user, setUser, tab }) {
   useEffect(() => {
     if (tab === "compete" && user.shareStats) api(`/api/compete?today=${today}`).then(setCompete).catch((e) => setError(e.message));
     if (tab === "leaderboards" && user.shareStats) api(`/api/leaderboards?today=${today}`).then(setLeaders).catch((e) => setError(e.message));
-  }, [tab, user.shareStats, today]);
+    if (tab === "family" && !memberId && user.shareStats) api(`/api/family?today=${today}`).then(setFamily).catch((e) => setError(e.message));
+  }, [tab, memberId, user.shareStats, today]);
 
   async function updateMe(body) {
     const result = await api("/api/me", { method: "PATCH", body });
@@ -420,6 +515,7 @@ export default function Progress({ user, setUser, tab }) {
     setLeaders(null);
     if (tab === "compete") setCompete(await api(`/api/compete?today=${today}`));
     if (tab === "leaderboards") setLeaders(await api(`/api/leaderboards?today=${today}`));
+    if (tab === "family") setFamily(await api(`/api/family?today=${today}`));
   }
 
   // Unlock anything already earned (e.g. right after this feature arrives).
@@ -433,18 +529,23 @@ export default function Progress({ user, setUser, tab }) {
     <div className="page progress">
       <h1>Progress</h1>
       <nav className="tabs" aria-label="Progress sections">
-        {TABS.map(([key, label, to]) => <Link key={key} to={to} aria-current={tab === key ? "page" : undefined}>{label}</Link>)}
+        {TABS.map(([key, label, to, short]) => (
+          <Link key={key} to={to} aria-current={tab === key ? "page" : undefined} aria-label={label}>
+            {short ? <><span className="tab-full">{label}</span><span className="tab-short">{short}</span></> : label}
+          </Link>
+        ))}
       </nav>
       {error && <p className="error">{error}</p>}
       {tab === "overview" && (stats ? <Overview stats={stats} game={game} goal={user.dailyGoal || 0} onSetGoal={(g) => updateMe({ dailyGoal: g })} /> : <p className="muted">Loading...</p>)}
       {tab === "achievements" && <Achievements game={game} />}
+      {tab === "family" && (user.shareStats ? (memberId ? <MemberProfile id={memberId} /> : <FamilyList data={family} />) : <JoinBoard onJoin={joinBoard} />)}
       {tab === "compete" && (user.shareStats ? <Compete data={compete} user={user} /> : <JoinBoard onJoin={joinBoard} />)}
       {tab === "leaderboards" && (user.shareStats ? <Leaderboards data={leaders} /> : <JoinBoard onJoin={joinBoard} />)}
       {tab === "overview" && (
         <p className="muted small">
           {user.shareStats
-            ? <>You're on the family board. <button className="linkish" onClick={() => updateMe({ shareStats: false })}>Leave the board</button></>
-            : <>Want to compete? <Link to="/progress/compete">Join the family board</Link>.</>}
+            ? <>Your family can see your progress (never what you're reading). <button className="linkish" onClick={() => updateMe({ shareStats: false })}>Hide my progress</button></>
+            : <>Your progress is hidden from your family. <Link to="/progress/family">Share it again</Link> to see theirs and compete.</>}
         </p>
       )}
     </div>

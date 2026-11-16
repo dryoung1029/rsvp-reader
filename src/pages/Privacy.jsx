@@ -29,9 +29,9 @@ export default function Privacy() {
       <h2>Reading stats</h2>
       <p>
         RAFAS records how many words you read each day and for how long, and each sitting's length, speed setting and
-        hour of the day, to show your progress, streaks and achievements. If you join the family board, other people
-        on the board see your totals, streaks, speeds, level, achievements and competition results. They never see
-        what you're reading.
+        hour of the day, to show your progress, streaks and achievements. Your family (the other members of this
+        RAFAS site) can see your progress: totals, streaks, speeds, level, achievements and competition results.
+        They never see what you're reading. You can hide your progress on the Progress page at any time.
       </p>
 
       <h2>Quick-check quizzes</h2>

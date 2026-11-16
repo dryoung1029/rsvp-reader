@@ -8,7 +8,7 @@ const SECTIONS = [
   ["cloud", "Google Drive, Dropbox, iCloud"],
   ["reading", "Reading controls"],
   ["pacing", "Pacing and chapters"],
-  ["progress", "Progress and family board"],
+  ["progress", "Progress and family"],
   ["achievements", "Achievements, levels and competitions"],
   ["rules", "Achievement rules"],
   ["sending", "Sending to family"],
@@ -154,15 +154,17 @@ export default function Help({ inboxEmail, signedIn }) {
       </section>
 
       <section id="progress">
-        <h2>Progress and family board</h2>
+        <h2>Progress and family</h2>
         <p>
           <Link to="/progress">Progress</Link> shows how much you've read today and this week, your reading streak
           (days in a row with some reading), your average speed over the last 30 days, and a chart of the last two
           weeks. Words count while they're flashing, not when you skip ahead.
         </p>
         <p>
-          The <b>family board</b> is optional. If you join it, the others on it can see your words this week, your
-          streak and your average speed, and you can see theirs. Nobody sees what anyone is reading. Leave it any time.
+          The <b>Family</b> tab shows everyone's progress: level, streak, how much they've read, speed and
+          achievements. Tap someone to see their full profile. Nobody sees what anyone is reading. Progress is shared
+          with your family unless you choose <b>Hide my progress</b> on the Progress page; while it's hidden, you
+          can't see the others' progress or compete either.
         </p>
       </section>
 
@@ -196,7 +198,7 @@ export default function Help({ inboxEmail, signedIn }) {
         <p>Set a number of words to read each day on the Progress page. You'll get a pop-up when you reach it.</p>
         <h3>Monthly competitions</h3>
         <p>
-          Everyone on the family board is automatically entered. Each calendar month there are four categories: most
+          Everyone sharing their progress is automatically entered. Each calendar month there are four categories: most
           words, top speed (fastest sitting of 1,000+ words), most documents finished and most days read. Whoever
           reads the most words is the month's champion, and the top 3 earn a podium achievement once the month ends.
           Past champions are listed on the <Link to="/progress/compete">Compete</Link> tab.
