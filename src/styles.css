@@ -499,3 +499,7 @@ table.leader td { vertical-align: middle; }
 }
 @media (max-width: 899px) { .landing .explainer video { max-width: 300px; } }
 @media (min-width: 900px) { .landing .explainer video { max-height: min(62vh, 600px); } }
+
+/* A button that reads as an inline text link. */
+.linklike { background: none; border: 0; padding: 0; color: var(--accent, inherit); text-decoration: underline; font: inherit; cursor: pointer; }
+.linklike:disabled { opacity: 0.5; cursor: default; }

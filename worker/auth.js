@@ -302,12 +302,23 @@ export async function handleAuth(request, env, pathname) {
     }
   }
 
-  // A personal token for the iPhone Shortcut / scripts. Shown once; only the hash is kept.
-  if (pathname === "/api/me/inbox-token" && method === "POST") {
+  // A personal token for the iPhone Shortcut / scripts. The database keeps only
+  // its hash; a copy sits in the user's inbox storage so setting up another
+  // device (or the second Shortcut) reuses the same token instead of breaking
+  // the Shortcuts already installed. POST { rotate: true } makes a new one.
+  if (pathname === "/api/me/inbox-token" && (method === "GET" || method === "POST")) {
     const user = await requireUser(request, env);
+    const key = `token:${user.id}`;
+    const body = method === "POST" ? await request.json().catch(() => ({})) : {};
+    if (!body.rotate && user.inbox_token_hash && env.INBOX) {
+      const saved = await env.INBOX.get(key);
+      if (saved && (await sha256(saved)) === user.inbox_token_hash) return json({ token: saved, existing: true });
+    }
+    if (method === "GET") return json({ token: "" });
     const token = `rafas_${randomToken(24)}`;
     await env.DB.prepare("UPDATE users SET inbox_token_hash = ? WHERE id = ?").bind(await sha256(token), user.id).run();
-    return json({ token });
+    if (env.INBOX) await env.INBOX.put(key, token);
+    return json({ token, existing: false });
   }
 
   // Other members, for "Send to…". Names only.
@@ -419,6 +430,7 @@ export async function deleteUserData(env, userId) {
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId)
   ]);
   if (env.INBOX) {
+    await env.INBOX.delete(`token:${userId}`);
     let cursor;
     do {
       const page = await env.INBOX.list({ prefix: `item:${userId}:`, cursor });
