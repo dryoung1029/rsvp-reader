@@ -201,10 +201,13 @@ function IphoneSetup({ user, setUser, config }) {
   const filesUrl = config?.shortcutFilesUrl;
   const both = shortcutUrl && filesUrl;
 
-  async function makeToken() {
+  // Reuses the current token, so Shortcuts already installed keep working.
+  // Only "Make a new token" replaces it.
+  async function makeToken(rotate = false) {
+    if (rotate && !window.confirm("Make a new token? Shortcuts using the old token stop working until you paste the new one into them.")) return;
     setBusy(true);
     setNote("");
-    const tokenPromise = api("/api/me/inbox-token", { method: "POST" }).then((r) => r.token);
+    const tokenPromise = api("/api/me/inbox-token", { method: "POST", body: rotate ? { rotate: true } : {} }).then((r) => r.token);
     const didCopy = await copyLater(tokenPromise);
     try {
       const value = await tokenPromise;
@@ -237,11 +240,10 @@ function IphoneSetup({ user, setUser, config }) {
         <div>
           <p>
             <b>Or add a RAFAS button to your Share menu</b> with a Shortcut.
-            {user.hasInboxToken && !token && " Setting it up again replaces your old token, so an older copy of the Shortcut stops working."}
           </p>
           {!token ? (
             <div className="row">
-              <button className="btn primary" disabled={busy} onClick={makeToken}>
+              <button className="btn primary" disabled={busy} onClick={() => makeToken()}>
                 {shortcutUrl ? "Set up the Share button" : user.hasInboxToken ? "Make a new Shortcut token" : "Create Shortcut token"}
               </button>
             </div>
@@ -261,11 +263,12 @@ function IphoneSetup({ user, setUser, config }) {
                     {both && <a className="btn primary" href={filesUrl} target="_blank" rel="noreferrer">2. Shortcut for files</a>}
                     <button className="btn sm" onClick={() => copy(token, setNote)}>{copied ? "Copy token again" : "Copy token"}</button>
                   </div>
+                  <div className="muted small">Already have the Shortcuts? This is the same token they should hold. If one stopped working, open it in the Shortcuts app and paste this token after <code>Bearer </code> in the Authorization header. <button className="linklike" disabled={busy} onClick={() => makeToken(true)}>Make a new token</button></div>
                   <div className="muted small">If iPhone says it can't open shared shortcuts, turn on Settings → Apps → Shortcuts → Private Sharing (Allow Untrusted Shortcuts on older iOS), then tap the link again.</div>
                 </>
               ) : (
                 <>
-                  <div className="small muted">Your token. Copy it now: it won't be shown again.</div>
+                  <div className="small muted">Your token. It stays the same each time you open this, so your Shortcuts keep working.</div>
                   <div className="code-line">{token}</div>
                   <div className="row"><button className="btn sm primary" onClick={() => copy(token, setNote)}>Copy token</button></div>
                   <div className="muted small">Then follow the <Link to="/help#phone">step-by-step guide</Link> to build the Shortcut.</div>

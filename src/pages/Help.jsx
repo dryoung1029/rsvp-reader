@@ -322,11 +322,11 @@ export default function Help({ inboxEmail, signedIn }) {
           <li>Add the action <b>Get Contents of URL</b>. Set the URL to <code>{origin}/api/inbox</code>.</li>
           <li>Tap the arrow to show more options. Method: <b>POST</b>. Add a header named <code>Authorization</code> with the value <code>Bearer</code> followed by a space and your token.</li>
           <li>Request Body: <b>Form</b>. Add a <b>Text</b> field named <code>text</code> and set its value to <b>Shortcut Input</b>.</li>
-          <li>Optionally add a <b>Show Notification</b> action saying "Sent to RAFAS".</li>
+          <li>Add a <b>Show Notification</b> action and set its text to <b>Contents of URL</b>. It then says "Added to RAFAS" or explains what went wrong.</li>
         </ol>
         <p>
           For files, duplicate the shortcut and call it <b>Send file to RAFAS</b>. Set it to receive <b>Files</b> and
-          <b> PDFs</b>, and in step 5 use a <b>File</b> field named <code>file</code> instead.
+          <b> PDFs</b>, and in step 5 set Request Body to <b>File</b> with <b>Shortcut Input</b> (or a Form <b>File</b> field named <code>file</code>).
         </p>
       </section>
 
@@ -360,6 +360,8 @@ export default function Help({ inboxEmail, signedIn }) {
         <p>In Google Drive, Dropbox or OneDrive, change sharing to "Anyone with the link", or use the Google Drive or Dropbox button instead.</p>
         <h3>Emailed items don't appear</h3>
         <p>Make sure you sent it from the email address you sign in with, then press <b>Sync</b>. A link that can't be imported stays in your inbox and shows an error.</p>
+        <h3>The Share button doesn't add anything</h3>
+        <p>Your Shortcut probably holds an old token. On the <Link to="/account">Account</Link> page tap <b>Set up the Share button</b> to copy your current token, then in the Shortcuts app open each RAFAS shortcut and paste it after <code>Bearer </code> in the Authorization header.</p>
       </section>
 
       <p className="muted small">More about the name and how RSVP works: <Link to="/about">About RAFAS</Link>.</p>

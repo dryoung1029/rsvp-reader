@@ -64,23 +64,60 @@ export async function saveItems(env, userId, items) {
 }
 
 // The Shortcut authenticates with a personal token instead of a cookie.
-async function userFromToken(request, env) {
-  const header = request.headers.get("authorization") || "";
+// Accepts "Bearer <token>", a bare token, Basic auth, an x-inbox-token header or ?token=.
+function tokenFrom(request) {
+  const header = (request.headers.get("authorization") || "").trim();
   let token = "";
   if (/^bearer\s+/i.test(header)) token = header.replace(/^bearer\s+/i, "").trim();
   else if (/^basic\s+/i.test(header)) {
     try { const d = atob(header.replace(/^basic\s+/i, "")); token = d.slice(d.indexOf(":") + 1); } catch { /* ignore */ }
-  }
-  token = token || new URL(request.url).searchParams.get("token") || "";
-  if (!token) return null;
+  } else if (/^rafas_\S+$/.test(header)) token = header;
+  return token || (request.headers.get("x-inbox-token") || "").trim() || new URL(request.url).searchParams.get("token") || "";
+}
+
+async function userFromToken(env, token) {
   const user = await env.DB.prepare("SELECT * FROM users WHERE inbox_token_hash = ?").bind(await sha256(token)).first();
-  if (!user) throw new HttpError(401, "Invalid inbox token. Create a new one on your Account page.");
+  if (!user) throw new HttpError(401, "RAFAS didn't recognise this Shortcut's token. Open rafas.app → Account → Set up the Share button, and paste the token into the Shortcut again.");
   return user;
+}
+
+// Shortcuts' "File" request body sends the file's bytes as the whole body.
+const MAGIC_TYPES = [
+  { test: (b) => b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46, type: "application/pdf", ext: "pdf" },
+  { test: (b) => b[0] === 0x50 && b[1] === 0x4b && new TextDecoder().decode(b.subarray(30, 58)).includes("epub"), type: "application/epub+zip", ext: "epub" },
+  { test: (b) => b[0] === 0x50 && b[1] === 0x4b, type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ext: "docx" }
+];
+const EXT_FOR_TYPE = { "application/pdf": "pdf", "application/epub+zip": "epub", "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx", "text/html": "html", "text/markdown": "md" };
+
+function filenameFrom(request) {
+  const disposition = request.headers.get("content-disposition") || "";
+  const m = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)"?/i);
+  let name = m ? m[1] : (request.headers.get("x-filename") || new URL(request.url).searchParams.get("name") || "");
+  try { name = decodeURIComponent(name); } catch { /* keep as is */ }
+  return name.trim();
+}
+
+function rawBodyFields(request, buffer) {
+  const type = (request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const bytes = new Uint8Array(buffer);
+  const params = new URL(request.url).searchParams;
+  const title = params.get("title") || "";
+  const sniffed = MAGIC_TYPES.find((m) => bytes.length > 4 && m.test(bytes));
+  if (!sniffed && (!type || type.startsWith("text/plain") || type === "application/x-www-form-urlencoded")) {
+    return { fields: { text: new TextDecoder().decode(bytes), title }, files: [] };
+  }
+  const fileType = sniffed?.type || type;
+  let name = filenameFrom(request);
+  const ext = sniffed?.ext || EXT_FOR_TYPE[fileType] || (fileType.startsWith("text/") ? "txt" : "");
+  if (!name) name = `document${ext ? `.${ext}` : ""}`;
+  else if (ext && !/\.[a-z0-9]{2,8}$/i.test(name)) name = `${name}.${ext}`;
+  return { fields: { title }, files: [{ name, type: fileType, data: buffer }] };
 }
 
 async function readPost(request) {
   const type = request.headers.get("content-type") || "";
   let fields = {};
+  let rawFiles;
   const files = [];
   if (type.includes("application/json")) {
     fields = await request.json().catch(() => ({}));
@@ -91,7 +128,8 @@ async function readPost(request) {
       else if (value && value.size) files.push({ name: value.name, type: value.type, data: await value.arrayBuffer() });
     }
   } else {
-    fields = { text: await request.text(), title: new URL(request.url).searchParams.get("title") || "" };
+    ({ fields, files: rawFiles } = rawBodyFields(request, await request.arrayBuffer()));
+    files.push(...rawFiles);
   }
   return buildItems({ title: fields.title || fields.subject, text: fields.text, html: fields.html, url: fields.url, files });
 }
@@ -102,11 +140,32 @@ export async function handleInbox(request, env, pathname) {
   const method = request.method;
 
   if (pathname === "/api/inbox" && method === "POST") {
-    const user = (await userFromToken(request, env)) || (await requireUser(request, env));
-    const items = await readPost(request);
-    if (!items.length) throw new HttpError(400, "Nothing readable was sent. Include text, a link, or a PDF/EPUB/DOCX/TXT file.");
-    const saved = await saveItems(env, user.id, items);
-    return json({ ok: true, items: saved.map(({ id, kind, title, name }) => ({ id, kind, title, name })) }, 201);
+    const token = tokenFrom(request);
+    if (!token) {
+      const user = await requireUser(request, env);
+      const items = await readPost(request);
+      if (!items.length) throw new HttpError(400, "Nothing readable was sent. Include text, a link, or a PDF/EPUB/DOCX/TXT file.");
+      const saved = await saveItems(env, user.id, items);
+      return json({ ok: true, items: saved.map(({ id, kind, title, name }) => ({ id, kind, title, name })) }, 201);
+    }
+    // Token requests come from Shortcuts and scripts. Answer in plain text so a
+    // Shortcut's notification can show exactly what happened, errors included.
+    try {
+      const user = await userFromToken(env, token);
+      const items = await readPost(request);
+      if (!items.length) throw new HttpError(400, "Nothing readable was sent. Share a link, text, or a PDF/EPUB/DOCX/TXT file.");
+      const saved = await saveItems(env, user.id, items);
+      const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return "link"; } };
+      const label = saved.map((i, n) => i.title || i.name || (i.kind === "url" ? `a link from ${host(items[n].url)}` : "text")).join(", ");
+      return new Response(`Added to RAFAS: ${clip(label, 120)}. It will be in your library next time you open RAFAS.`, {
+        status: 201, headers: { "content-type": "text/plain; charset=utf-8" }
+      });
+    } catch (error) {
+      if (!(error instanceof HttpError)) console.error(error);
+      const status = error instanceof HttpError ? error.status : 500;
+      const message = error instanceof HttpError ? error.message : "Something went wrong on the server.";
+      return new Response(`Not sent to RAFAS. ${message}`, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
+    }
   }
 
   const user = await requireUser(request, env);

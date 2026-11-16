@@ -133,8 +133,8 @@ Family members can always use email: the Account page has an **Add RAFAS to Cont
 
 For a RAFAS button in the iPhone Share menu, build the Shortcut once and share it:
 
-1. Build "Send to RAFAS" as described on the Help page (Get Contents of URL → `https://rafas.app/api/inbox`, POST, header `Authorization: Bearer <token>`, form field `text` or `file` = Shortcut Input).
-2. In the shortcut's settings, open the **Setup** tab and add an **import question** on the `Authorization` header value, e.g. "Paste your RAFAS token". Change that value to just `Bearer ` plus the token, so the question replaces your token when someone else installs it. Your token is not shared.
+1. Build "Send to RAFAS" as described on the Help page (Get Contents of URL → `https://rafas.app/api/inbox`, POST, header `Authorization: Bearer <token>`, form field `text` = Shortcut Input; for files, Request Body **File** = Shortcut Input). End it with **Show Notification** set to *Contents of URL*: token requests get a plain-text reply ("Added to RAFAS: …" or the reason it failed).
+2. In the shortcut's settings, open the **Setup** tab and add an **import question** on the `Authorization` header value, e.g. "Paste your RAFAS token". Without it, everyone who installs the link gets *your* token and their items land in your library. Check by opening the iCloud link: it should ask for a token.
 3. Share → **Copy iCloud Link**, and put the link in `SHORTCUT_URL` in `wrangler.jsonc`, then deploy. If you make a second Shortcut for files (Request Body field `file` = Shortcut Input), put its link in `SHORTCUT_FILES_URL`; the Account page then offers both.
 
 The Account page then shows **Set up the Share button**: it creates the person's token, copies it, and links to the Shortcut. If you edit the Shortcut later, copy a new iCloud link; old links keep the old version.
@@ -154,7 +154,7 @@ The Account page then shows **Set up the Share button**: it creates the person's
 
 ### Inbox API
 
-`POST /api/inbox` accepts a personal token (created on the Account page) as `Authorization: Bearer <token>`. The other endpoints use the signed-in session.
+`POST /api/inbox` accepts a personal token (created on the Account page) as `Authorization: Bearer <token>` (a bare token, `x-inbox-token` or `?token=` also work). Token requests get a plain-text reply. A raw request body that isn't text (a PDF, EPUB or DOCX) is saved as a file; `?name=` or `Content-Disposition` sets its name. The Account page reuses the same token each time unless you choose **Make a new token**. The other endpoints use the signed-in session.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
