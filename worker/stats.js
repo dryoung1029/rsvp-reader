@@ -2,6 +2,7 @@
 import { HttpError, json, readJson } from "./util.js";
 import { requireUser } from "./auth.js";
 import { evaluate } from "./game.js";
+import { pendingSummary } from "./quiz.js";
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -32,11 +33,11 @@ function wpm(words, ms) {
 
 async function summaryFor(env, userId, today) {
   const { results } = await env.DB.prepare(
-    "SELECT day, words, ms FROM reading_days WHERE user_id = ? AND day >= ? AND words > 0 ORDER BY day"
+    "SELECT day, words, ms, verified_words FROM reading_days WHERE user_id = ? AND day >= ? AND words > 0 ORDER BY day"
   ).bind(userId, shiftDay(today, -400)).all();
-  const totals = await env.DB.prepare("SELECT COALESCE(SUM(words), 0) AS words, COALESCE(SUM(ms), 0) AS ms FROM reading_days WHERE user_id = ?").bind(userId).first();
+  const totals = await env.DB.prepare("SELECT COALESCE(SUM(words), 0) AS words, COALESCE(SUM(ms), 0) AS ms, COALESCE(SUM(verified_words), 0) AS verified FROM reading_days WHERE user_id = ?").bind(userId).first();
   const byDay = new Map(results.map((r) => [r.day, r]));
-  const sumSince = (start) => results.filter((r) => r.day >= start).reduce((a, r) => ({ words: a.words + r.words, ms: a.ms + r.ms }), { words: 0, ms: 0 });
+  const sumSince = (start) => results.filter((r) => r.day >= start).reduce((a, r) => ({ words: a.words + r.words, ms: a.ms + r.ms, verified: a.verified + r.verified_words }), { words: 0, ms: 0, verified: 0 });
   const week = sumSince(shiftDay(today, -6));
   const month = sumSince(shiftDay(today, -29));
   const days = [];
@@ -54,9 +55,9 @@ async function summaryFor(env, userId, today) {
     prev = r.day;
   }
   return {
-    today: { words: byDay.get(today)?.words || 0, ms: byDay.get(today)?.ms || 0 },
+    today: { words: byDay.get(today)?.words || 0, ms: byDay.get(today)?.ms || 0, verified: byDay.get(today)?.verified_words || 0 },
     week,
-    total: { words: totals.words, ms: totals.ms },
+    total: { words: totals.words, ms: totals.ms, verified: totals.verified },
     avgWpm: wpm(month.words, month.ms),
     streak: streakFrom(results.map((r) => r.day), today),
     bestStreak: best,
@@ -95,15 +96,18 @@ export async function handleStats(request, env, pathname) {
       if (words < 20) continue;
       // Sanity check: the words can't have gone by faster than the speed setting allows.
       if (ms < (words / Math.max(wpm, 1)) * 60000 * 0.6) continue;
+      const docId = /^[0-9a-f-]{36}$/.test(String(sess.docId || "")) ? sess.docId : null;
+      const startWord = Number.isFinite(Number(sess.startWord)) ? Math.max(0, Math.floor(sess.startWord)) : null;
+      const endWord = Number.isFinite(Number(sess.endWord)) ? Math.max(0, Math.floor(sess.endWord)) : null;
       statements.push(env.DB.prepare(
-        "INSERT INTO reading_sessions (user_id, day, hour, words, ms, wpm, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      ).bind(user.id, sess.day, hour, words, ms, wpm, now));
+        "INSERT INTO reading_sessions (user_id, day, hour, words, ms, wpm, created_at, doc_id, start_word, end_word, verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
+      ).bind(user.id, sess.day, hour, words, ms, wpm, now, docId, startWord, endWord));
     }
     if (statements.length) await env.DB.batch(statements);
     const today = DAY_RE.test(String(body.today || "")) ? body.today : entries[0]?.day;
     const unlocked = statements.length ? await evaluate(env, user.id, today) : [];
     const todayRow = today ? await env.DB.prepare("SELECT words FROM reading_days WHERE user_id = ? AND day = ?").bind(user.id, today).first() : null;
-    return json({ ok: true, unlocked, todayWords: todayRow?.words || 0, dailyGoal: user.daily_goal || 0 });
+    return json({ ok: true, unlocked, todayWords: todayRow?.words || 0, dailyGoal: user.daily_goal || 0, quiz: await pendingSummary(env, user.id) });
   }
 
   const today = todayFrom(request);

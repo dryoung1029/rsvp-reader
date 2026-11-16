@@ -67,6 +67,11 @@ export const ACHIEVEMENTS = [
   { id: "book_club", group: "Family", icon: "☕", title: "Book Club", desc: "Send 10 documents to family.", points: 25, progress: (c) => [c.sent, 10], check: (c) => c.sent >= 10 },
   { id: "recommended", group: "Family", icon: "🤝", title: "Good Recommendation", desc: "Finish a document someone sent you.", points: 15, progress: (c) => [c.finishedShared, 1], check: (c) => c.finishedShared >= 1 },
 
+  // Quizzes: the quick check that makes reading count
+  { id: "sharp", group: "Quizzes", icon: "🧠", title: "Sharp", desc: "Pass your first reading quiz.", points: 10, progress: (c) => [c.quizzes, 1], check: (c) => c.quizzes >= 1 },
+  { id: "perfect_ten", group: "Quizzes", icon: "🎓", title: "Perfect Ten", desc: "Pass 10 quizzes on the first try.", points: 25, progress: (c) => [c.quizzesFirstTry, 10], check: (c) => c.quizzesFirstTry >= 10 },
+  { id: "scholar", group: "Quizzes", icon: "📜", title: "Scholar", desc: "Pass 50 reading quizzes.", points: 50, progress: (c) => [c.quizzes, 50], check: (c) => c.quizzes >= 50 },
+
   // Competition
   { id: "podium", group: "Competition", icon: "🥉", title: "On the Podium", desc: "Finish in the top 3 for words read in a monthly competition.", points: 25, progress: (c) => [c.podiums, 1], check: (c) => c.podiums >= 1 },
   { id: "champion", group: "Competition", icon: "🏆", title: "Monthly Champion", desc: "Read the most words in a monthly competition.", points: 50, progress: (c) => [c.wins, 1], check: (c) => c.wins >= 1 },

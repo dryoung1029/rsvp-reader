@@ -389,6 +389,7 @@ export async function deleteUserData(env, userId) {
     env.DB.prepare("DELETE FROM reading_sessions WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM user_events WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM achievements WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM quizzes WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId)
   ]);
   if (env.INBOX) {

@@ -34,6 +34,14 @@ export default function Privacy() {
         what you're reading.
       </p>
 
+      <h2>Quick-check quizzes</h2>
+      <p>
+        To write quiz questions, RAFAS sends the stretch of text you just read (up to a few thousand words) to
+        Anthropic's Claude API, which returns the questions. If Claude isn't set up for this site, the questions are
+        made on the RAFAS server from the text itself and nothing is sent. Your answers and results are stored with
+        your account.
+      </p>
+
       <h2>Other members</h2>
       <p>
         Members can see each other's names, so they can send each other documents. Sending a document gives the other

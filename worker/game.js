@@ -33,9 +33,9 @@ function bestStreakOf(days) {
 // Returns Map(userId -> { wins, podiums }).
 async function pastCompetitionResults(env, currentMonth) {
   const { results } = await env.DB.prepare(
-    `SELECT r.user_id, substr(r.day, 1, 7) AS month, SUM(r.words) AS words
+    `SELECT r.user_id, substr(r.day, 1, 7) AS month, SUM(r.verified_words) AS words
      FROM reading_days r JOIN users u ON u.id = r.user_id
-     WHERE u.share_stats = 1 AND r.day < ? AND r.words > 0
+     WHERE u.share_stats = 1 AND r.day < ? AND r.verified_words > 0
      GROUP BY r.user_id, month`
   ).bind(`${currentMonth}-01`).all();
   const byMonth = new Map();
@@ -60,17 +60,17 @@ async function pastCompetitionResults(env, currentMonth) {
 
 export async function buildContext(env, userId, today, competition) {
   const [daysRes, sessRes, eventsRes, userRes] = await env.DB.batch([
-    env.DB.prepare("SELECT day, words, ms FROM reading_days WHERE user_id = ? AND words > 0 ORDER BY day").bind(userId),
+    env.DB.prepare("SELECT day, verified_words AS words, verified_ms AS ms FROM reading_days WHERE user_id = ? AND verified_words > 0 ORDER BY day").bind(userId),
     env.DB.prepare(
       `SELECT MAX(CASE WHEN words >= 500 THEN wpm END) AS w500, MAX(CASE WHEN words >= 1000 THEN wpm END) AS w1000,
               MAX(words) AS longest,
               MAX(CASE WHEN hour >= 22 OR hour < 4 THEN 1 ELSE 0 END) AS night,
               MAX(CASE WHEN hour >= 4 AND hour < 7 THEN 1 ELSE 0 END) AS early
-       FROM reading_sessions WHERE user_id = ?`
+       FROM reading_sessions WHERE user_id = ? AND verified = 1`
     ).bind(userId),
     env.DB.prepare(
       `SELECT kind, COUNT(*) AS n, MAX(value) AS maxv, SUM(CASE WHEN meta = 'shared' THEN 1 ELSE 0 END) AS shared,
-              COUNT(DISTINCT meta) AS metas
+              COUNT(DISTINCT meta) AS metas, SUM(CASE WHEN kind = 'quiz' AND value = 1 THEN 1 ELSE 0 END) AS firstTry
        FROM user_events WHERE user_id = ? GROUP BY kind`
     ).bind(userId),
     env.DB.prepare("SELECT share_stats, daily_goal FROM users WHERE id = ?").bind(userId)
@@ -106,7 +106,9 @@ export async function buildContext(env, userId, today, competition) {
     received: ev.received?.n || 0,
     onBoard: Boolean(user.share_stats),
     wins: comp.wins,
-    podiums: comp.podiums
+    podiums: comp.podiums,
+    quizzes: ev.quiz?.n || 0,
+    quizzesFirstTry: ev.quiz?.firstTry || 0
   };
 }
 
@@ -145,16 +147,16 @@ async function monthStandings(env, month) {
   const { start, end } = monthBounds(month);
   const [words, days, speed, finished, people] = await env.DB.batch([
     env.DB.prepare(
-      `SELECT r.user_id, SUM(r.words) AS v FROM reading_days r JOIN users u ON u.id = r.user_id
+      `SELECT r.user_id, SUM(r.verified_words) AS v FROM reading_days r JOIN users u ON u.id = r.user_id
        WHERE u.share_stats = 1 AND r.day BETWEEN ? AND ? GROUP BY r.user_id HAVING v > 0 ORDER BY v DESC`
     ).bind(start, end),
     env.DB.prepare(
       `SELECT r.user_id, COUNT(*) AS v FROM reading_days r JOIN users u ON u.id = r.user_id
-       WHERE u.share_stats = 1 AND r.day BETWEEN ? AND ? AND r.words > 0 GROUP BY r.user_id ORDER BY v DESC`
+       WHERE u.share_stats = 1 AND r.day BETWEEN ? AND ? AND r.verified_words > 0 GROUP BY r.user_id ORDER BY v DESC`
     ).bind(start, end),
     env.DB.prepare(
       `SELECT s.user_id, MAX(s.wpm) AS v FROM reading_sessions s JOIN users u ON u.id = s.user_id
-       WHERE u.share_stats = 1 AND s.day BETWEEN ? AND ? AND s.words >= 1000 GROUP BY s.user_id ORDER BY v DESC`
+       WHERE u.share_stats = 1 AND s.day BETWEEN ? AND ? AND s.words >= 1000 AND s.verified = 1 GROUP BY s.user_id ORDER BY v DESC`
     ).bind(start, end),
     env.DB.prepare(
       `SELECT e.user_id, COUNT(*) AS v FROM user_events e JOIN users u ON u.id = e.user_id

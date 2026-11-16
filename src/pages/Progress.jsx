@@ -165,7 +165,7 @@ function Overview({ stats, game, goal, onSetGoal }) {
       {game && <LevelCard game={game} />}
       <GoalCard goal={goal} today={stats.today.words} onSet={onSetGoal} />
       <div className="tiles">
-        <Tile label="Today" value={stats.today.words.toLocaleString()} sub={`words · ${minutes(stats.today.ms)}`} />
+        <Tile label="Today" value={stats.today.words.toLocaleString()} sub={`words · ${minutes(stats.today.ms)} · ${(stats.today.verified || 0).toLocaleString()} counted`} />
         <Tile label="Streak" value={`${stats.streak} ${stats.streak === 1 ? "day" : "days"}`} sub={stats.bestStreak > stats.streak ? `Best: ${stats.bestStreak} days` : stats.streak ? "Your best yet" : "Read today to start one"} />
         <Tile label="This week" value={stats.week.words.toLocaleString()} sub={`words · ${minutes(stats.week.ms)}`} />
         <Tile label="Average speed" value={stats.avgWpm ? `${stats.avgWpm}` : "–"} sub="words per minute, last 30 days" />
@@ -173,7 +173,9 @@ function Overview({ stats, game, goal, onSetGoal }) {
       <section className="panel">
         <h2>Words per day</h2>
         <DayChart days={stats.days} goal={goal} />
-        <div className="muted small">All time: {stats.total.words.toLocaleString()} words in {minutes(stats.total.ms)}.</div>
+        <div className="muted small">
+          All time: {stats.total.words.toLocaleString()} words in {minutes(stats.total.ms)}. {(stats.total.verified || 0).toLocaleString()} of them passed a quiz and count toward achievements and the competition.
+        </div>
       </section>
       {recent.length > 0 && (
         <section className="panel">
@@ -204,6 +206,7 @@ function Achievements({ game }) {
           <div><span className="big-num">{game.points}</span> <span className="muted">of {TOTAL_POINTS} points</span></div>
         </div>
         <Meter value={game.points} max={TOTAL_POINTS} label="Achievement points" />
+        <div className="muted small">Reading counts toward achievements once you pass the 3-question quick check on it. RAFAS offers one after a few minutes of reading.</div>
         <div className="seg" role="group" aria-label="Show">
           {[["all", "All"], ["unlocked", "Unlocked"], ["locked", "Still to get"]].map(([k, l]) => (
             <button key={k} className={filter === k ? "on" : ""} onClick={() => setFilter(k)}>{l}</button>
@@ -294,7 +297,7 @@ function Compete({ data, user }) {
           <h2>{monthName(data.month)}</h2>
         </div>
         <div className="countdown"><span className="big-num">{data.daysLeft}</span> <span className="muted">{data.daysLeft === 1 ? "day" : "days"} left</span></div>
-        <p className="muted small">Whoever reads the most words this month is champion. The top 3 earn a podium achievement. Every member of the family board takes part.</p>
+        <p className="muted small">Only reading that passed a quick check counts. Whoever reads the most words this month is champion. The top 3 earn a podium achievement. Every member of the family board takes part.</p>
       </section>
       <div className="compete-grid">
         {CATEGORIES.map(([key, label, format, hint]) => (

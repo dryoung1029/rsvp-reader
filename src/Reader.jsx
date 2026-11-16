@@ -14,6 +14,7 @@ import { api } from "./lib/api.js";
 import { Link, navigate } from "./router.jsx";
 import { getStatsTracker, checkAchievements } from "./lib/stats.js";
 import Sheet from "./components/Sheet.jsx";
+import QuizSheet from "./components/QuizSheet.jsx";
 import ContextView from "./components/ContextView.jsx";
 
 const SAMPLE_TEXT = `Welcome to RAFAS. Words appear one at a time in the same spot, so your eyes can stay still. The red letter is the pivot: rest your eyes on it. Tap the middle to pause, or tap the left or right edge to jump back or forward a sentence. Add an article, a PDF, an EPUB, a Word document or some pasted text, and RAFAS will save it to your library and remember your place on every device you sign in on.`;
@@ -160,7 +161,11 @@ export default function Reader({ user, config, visible, path }) {
   const [warmup, setWarmup] = useState(() => store.get("rsvp:warmup") !== "false");
   const [showContext, setShowContext] = useState(() => store.get("rsvp:context") !== "false");
   const [chapters, setChapters] = useState([]);
-  const [sheet, setSheet] = useState(null); // "chapters" | "send" | null
+  const [sheet, setSheet] = useState(null); // "chapters" | "send" | "quiz" | null
+  // Reading waiting for a quiz, per document: { [docId]: { words, ready } }
+  const [quizPending, setQuizPending] = useState({});
+  const [quizSnoozed, setQuizSnoozed] = useState({}); // docId -> words when "Later" was tapped
+  const wordIndexRef = useRef(0);
   const [members, setMembers] = useState([]);
   const [sendNote, setSendNote] = useState("");
   const [touched, setTouched] = useState(false); // has the reader moved since opening? (context view)
@@ -181,6 +186,7 @@ export default function Reader({ user, config, visible, path }) {
   const docIdRef = useRef(null);
   const playingRef = useRef(false);
   useEffect(() => { docIdRef.current = docId; }, [docId]);
+  useEffect(() => { wordIndexRef.current = Math.min(words.length - 1, (index + 1) * chunkSize - 1); }, [index, chunkSize, words.length]);
   useEffect(() => { playingRef.current = playing; }, [playing]);
 
   const lastDocKey = `rafas:currentDoc:${user.id}`;
@@ -362,6 +368,19 @@ export default function Reader({ user, config, visible, path }) {
     }
   }, [config, importItem]);
 
+  // Which documents have reading waiting for a quiz.
+  const applyPending = useCallback((list) => {
+    setQuizPending(Object.fromEntries((list || []).map((p) => [p.docId, p])));
+  }, []);
+  const refreshQuizPending = useCallback(() => {
+    api("/api/quiz/pending").then((r) => applyPending(r.pending)).catch(() => {});
+  }, [applyPending]);
+  useEffect(() => {
+    const onPending = (e) => applyPending(e.detail);
+    window.addEventListener("rafas:quiz-pending", onPending);
+    return () => window.removeEventListener("rafas:quiz-pending", onPending);
+  }, [applyPending]);
+
   // Pull changes from other devices. If the open document was read elsewhere
   // more recently, jump to that spot (unless you're in the middle of reading).
   const runSync = useCallback(async ({ quiet = true } = {}) => {
@@ -423,6 +442,7 @@ export default function Reader({ user, config, visible, path }) {
       await importPendingShares();
       await runSync();
       await syncInbox();
+      refreshQuizPending();
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -433,7 +453,7 @@ export default function Reader({ user, config, visible, path }) {
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         setPlaying(false);
-        stats.stop();
+        stats.stop(wordIndexRef.current);
         stats.flush({ keepalive: true });
         flushPosition({ push: true, keepalive: true });
       } else {
@@ -487,12 +507,12 @@ export default function Reader({ user, config, visible, path }) {
     if (playing) {
       setTouched(true);
       if (Date.now() - pausedAtRef.current > 10000) rampStartRef.current = Date.now();
-      stats.start(wpm);
+      stats.start(wpm, docIdRef.current, Math.max(0, wordIndexRef.current));
       const interval = setInterval(() => stats.flush(), 60000);
       return () => clearInterval(interval);
     }
     pausedAtRef.current = Date.now();
-    stats.stop();
+    stats.stop(wordIndexRef.current);
     stats.flush();
     return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -817,6 +837,25 @@ export default function Reader({ user, config, visible, path }) {
                 {docId && members.length > 0 && <button className="btn sm" onClick={() => setSheet("send")}>Send to…</button>}
               </div>
             )}
+            {docId && !playing && quizPending[docId] && (() => {
+              const p = quizPending[docId];
+              if (p.ready && (quizSnoozed[docId] ?? -1) < p.words - 200) {
+                return (
+                  <div className="quiz-banner">
+                    <span><b>Make it count:</b> 3 quick questions on the last {p.words.toLocaleString()} words you read.</span>
+                    <span className="row">
+                      <button className="btn sm primary" onClick={() => setSheet("quiz")}>Take the quiz</button>
+                      <button className="btn sm ghost" onClick={() => setQuizSnoozed((s) => ({ ...s, [docId]: p.words }))}>Later</button>
+                    </span>
+                  </div>
+                );
+              }
+              return p.words >= 120 ? (
+                <div className="quiz-waiting muted">
+                  {p.words.toLocaleString()} words waiting for a quick check. <button className="linkish" onClick={() => setSheet("quiz")}>Take the quiz</button>
+                </div>
+              ) : null;
+            })()}
             {status && <div className="status" role="status">{status}</div>}
           </section>
         </div>
@@ -927,6 +966,20 @@ export default function Reader({ user, config, visible, path }) {
             })}
           </ol>
         </Sheet>
+      )}
+
+      {sheet === "quiz" && docId && (
+        <QuizSheet
+          docId={docId}
+          title={title}
+          prepare={async () => {
+            await stats.flush();
+            const doc = await getDoc(docId);
+            if (doc && !doc.synced) await uploadDoc(doc);
+          }}
+          onClose={() => { setSheet(null); refreshQuizPending(); }}
+          onDone={(r) => { refreshQuizPending(); if (r.passed) setStatus(`Quiz passed: ${r.words.toLocaleString()} words counted.`); }}
+        />
       )}
 
       {sheet === "send" && (

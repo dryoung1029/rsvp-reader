@@ -178,6 +178,14 @@ export default function Help({ inboxEmail, signedIn }) {
           Speed achievements count a whole sitting (from Play to Pause) at the slowest speed you used during it, so
           you have to hold the pace. Sittings that went by faster than the speed setting allows don't count.
         </p>
+        <h3>Quick checks (quizzes)</h3>
+        <p>
+          To stop anyone winning by turning the speed all the way up, reading only counts toward achievements, levels,
+          competitions and leaderboards after you pass a quick check on it. After a few minutes of reading, a
+          <b> Make it count</b> button appears under the reader: answer 3 multiple-choice questions about what you just read.
+          Get all 3 right and those words count. Miss one and you get one more try with new questions. Reading always
+          counts in your own stats either way.
+        </p>
         <h3>Levels</h3>
         <p>
           You earn XP from reading (1 XP per 100 words) and from achievements (5 XP per point). Levels come with

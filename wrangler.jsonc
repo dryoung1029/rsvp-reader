@@ -50,6 +50,7 @@
 	// Secrets (not stored in this file):
 	//   npx wrangler secret put RESEND_API_KEY   from resend.com, for sign-in emails
 	//   npx wrangler secret put ADMIN_EMAILS     comma-separated; these people can sign in without an invite and manage invites
+	//   npx wrangler secret put ANTHROPIC_API_KEY  optional; Claude writes the reading quizzes (otherwise fill-in-the-blank questions)
 	"routes": [
 		{
 			"pattern": "rafas.app",

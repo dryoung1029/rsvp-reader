@@ -157,12 +157,10 @@ export async function handleDocs(request, env, pathname) {
       await env.DB.prepare(`UPDATE documents SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, id).run();
     }
     const updated = await getOwnedDoc(env, user.id, id);
-    // First time reaching the end counts as finishing it.
+    // Record when the end is first reached. It counts toward achievements once
+    // the last stretch passes a quiz (worker/quiz.js).
     if (!updated.finished_at && updated.word_count > 0 && updated.read_words >= updated.word_count - 1) {
-      await env.DB.batch([
-        env.DB.prepare("UPDATE documents SET finished_at = ? WHERE id = ? AND finished_at IS NULL").bind(Date.now(), id),
-        logEvent(env, user.id, "finished", { value: updated.word_count, meta: updated.source })
-      ]);
+      await env.DB.prepare("UPDATE documents SET finished_at = ? WHERE id = ? AND finished_at IS NULL").bind(Date.now(), id).run();
     }
     return json({ doc: docView(updated) });
   }
