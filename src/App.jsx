@@ -3,7 +3,7 @@ import { Link, navigate, usePath } from "./router.jsx";
 import { APP_NAME, APP_LONG_NAME, DEFAULT_INBOX_EMAIL } from "./config.js";
 import { setLibraryOwner } from "./lib/library.js";
 import Reader from "./Reader.jsx";
-import About, { DemoReader } from "./pages/About.jsx";
+import About from "./pages/About.jsx";
 import Help from "./pages/Help.jsx";
 import Privacy from "./pages/Privacy.jsx";
 import SignIn from "./pages/SignIn.jsx";
@@ -28,6 +28,18 @@ function initialTheme() {
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
+// The two-minute explainer. Loads nothing until someone presses play.
+function ExplainerVideo() {
+  return (
+    <figure className="explainer">
+      <video controls playsInline preload="none" poster="/rafas-explainer-poster.jpg" src="/rafas-explainer.mp4">
+        Your browser can't play this video. <a href="/rafas-explainer.mp4">Open it directly</a>.
+      </video>
+      <figcaption className="muted small">How RAFAS works, in two minutes. Turn the sound on.</figcaption>
+    </figure>
+  );
+}
+
 function Landing({ onSignedIn }) {
   return (
     <div className="landing">
@@ -37,10 +49,24 @@ function Landing({ onSignedIn }) {
           RAFAS shows words one at a time, right where your eyes already are. Add articles, PDFs, books and documents,
           and your library and reading position follow you between your phone and computer.
         </p>
-        <DemoReader />
+        <ExplainerVideo />
         <p className="muted small"><Link to="/about">What is RAFAS?</Link> · <Link to="/help">Help</Link></p>
       </div>
       <SignIn mode="signin" onSignedIn={onSignedIn} />
+    </div>
+  );
+}
+
+// The page an invite link opens: the explainer next to (or above) the sign-up form.
+function JoinPage({ code, onSignedIn }) {
+  return (
+    <div className="landing join">
+      <div className="landing-copy">
+        <h1>Read as fast as Swizz.</h1>
+        <p className="lede">Watch this first, then create your account.</p>
+        <ExplainerVideo />
+      </div>
+      <SignIn key={code} mode="join" inviteCode={code} onSignedIn={onSignedIn} />
     </div>
   );
 }
@@ -122,7 +148,7 @@ export default function App() {
         </div>
       );
     } else if (path !== "/") page = <article className="page"><h1>Page not found</h1><p><Link to="/">Back to reading</Link></p></article>;
-  } else if (joinMatch) page = <SignIn key={joinMatch[1]} mode="join" inviteCode={joinMatch[1].toLowerCase()} onSignedIn={onSignedIn} />;
+  } else if (joinMatch) page = <JoinPage code={joinMatch[1].toLowerCase()} onSignedIn={onSignedIn} />;
   else if (path === "/verify") page = <SignIn mode="verify" onSignedIn={onSignedIn} />;
   else if (["/signin", "/", "/account", "/progress", "/add"].includes(path) || path.startsWith("/progress/")) page = <Landing onSignedIn={onSignedIn} />;
   else page = <article className="page"><h1>Page not found</h1><p><Link to="/">Home</Link></p></article>;

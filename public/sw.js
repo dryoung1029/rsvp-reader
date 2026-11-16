@@ -1,6 +1,6 @@
 // RAFAS service worker: receives items from the OS share sheet
 // (Web Share Target) and keeps the app shell available offline.
-const CACHE = "rafas-shell-v3";
+const CACHE = "rafas-shell-v4";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {
@@ -62,6 +62,8 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.method !== "GET" || url.pathname.startsWith("/api/")) return;
+  // Video is streamed in pieces (range requests); leave it to the browser.
+  if (request.headers.has("range") || url.pathname.endsWith(".mp4")) return;
 
   // Network first, falling back to the cached copy when offline.
   event.respondWith((async () => {
