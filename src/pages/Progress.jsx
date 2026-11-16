@@ -266,7 +266,7 @@ function JoinBoard({ onJoin }) {
 
 const CATEGORIES = [
   ["words", "Most words", (v) => `${v.toLocaleString()} words`],
-  ["speed", "Top speed", (v) => `${v} wpm`, "Fastest sitting of 1,000+ words"],
+  ["speed", "Top speed", (v) => `${v} wpm`, "Fastest sitting of 1,000+ words, in a document of 2,000+ words"],
   ["finished", "Most finished", (v) => `${v} ${v === 1 ? "document" : "documents"}`],
   ["days", "Most days read", (v) => `${v} ${v === 1 ? "day" : "days"}`]
 ];

@@ -229,7 +229,10 @@ async function answerQuiz(request, env, user, quizId) {
     const { results: sessions } = await env.DB.prepare(
       `SELECT id, day, words, ms, end_word FROM reading_sessions WHERE user_id = ? AND verified = 0 AND id IN (${placeholders})`
     ).bind(user.id, ...ids).all();
-    statements.push(env.DB.prepare(`UPDATE reading_sessions SET verified = 1 WHERE user_id = ? AND id IN (${placeholders})`).bind(user.id, ...ids));
+    statements.push(env.DB.prepare(
+      `UPDATE reading_sessions SET verified = 1, doc_words = (SELECT word_count FROM documents d WHERE d.id = reading_sessions.doc_id)
+       WHERE user_id = ? AND id IN (${placeholders})`
+    ).bind(user.id, ...ids));
     const byDay = new Map();
     for (const s of sessions) {
       const d = byDay.get(s.day) || { words: 0, ms: 0 };

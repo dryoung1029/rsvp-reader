@@ -176,7 +176,8 @@ export default function Help({ inboxEmail, signedIn }) {
         </p>
         <p>
           Speed achievements count a whole sitting (from Play to Pause) at the slowest speed you used during it, so
-          you have to hold the pace. Sittings that went by faster than the speed setting allows don't count.
+          you have to hold the pace. They only count in documents of at least 2,000 words, and only once you've passed
+          the quiz on that reading. Sittings that went by faster than the speed setting allows don't count.
         </p>
         <h3>Quick checks (quizzes)</h3>
         <p>
