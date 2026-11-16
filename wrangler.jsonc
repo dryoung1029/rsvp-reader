@@ -3,6 +3,12 @@
 	"name": "rafas",
 	"main": "worker/index.js",
 	"compatibility_date": "2026-11-01",
+	// Build the app before every deploy or upload, so Cloudflare's GitHub builds work
+	// even when no separate build command is set in the dashboard.
+	"build": {
+		"command": "npm run build",
+		"watch_dir": ["src", "public", "shared", "index.html"]
+	},
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
