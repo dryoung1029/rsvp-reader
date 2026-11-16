@@ -20,7 +20,8 @@ function config(env) {
       ? { clientId: env.GOOGLE_CLIENT_ID, apiKey: env.GOOGLE_API_KEY, appId: env.GOOGLE_APP_ID || "" }
       : null,
     dropbox: env.DROPBOX_APP_KEY ? { appKey: env.DROPBOX_APP_KEY } : null,
-    shortcutUrl: /^https:\/\/(www\.)?icloud\.com\/shortcuts\//.test(env.SHORTCUT_URL || "") ? env.SHORTCUT_URL : ""
+    shortcutUrl: /^https:\/\/(www\.)?icloud\.com\/shortcuts\//.test(env.SHORTCUT_URL || "") ? env.SHORTCUT_URL : "",
+    shortcutFilesUrl: /^https:\/\/(www\.)?icloud\.com\/shortcuts\//.test(env.SHORTCUT_FILES_URL || "") ? env.SHORTCUT_FILES_URL : ""
   };
 }
 

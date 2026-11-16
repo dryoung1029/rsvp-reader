@@ -198,6 +198,8 @@ function IphoneSetup({ user, setUser, config }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const shortcutUrl = config?.shortcutUrl;
+  const filesUrl = config?.shortcutFilesUrl;
+  const both = shortcutUrl && filesUrl;
 
   async function makeToken() {
     setBusy(true);
@@ -247,10 +249,16 @@ function IphoneSetup({ user, setUser, config }) {
             <div className="callout">
               {shortcutUrl ? (
                 <>
-                  <div><b>{copied ? "Your token is copied." : "Copy your token first:"}</b> Now tap <b>Get the Shortcut</b>, then <b>Add Shortcut</b>, and paste the token when it asks.</div>
+                  <div>
+                    <b>{copied ? "Your token is copied." : "Copy your token first:"}</b>{" "}
+                    {both
+                      ? <>Add both Shortcuts, one for links and one for files. Tap each button, then <b>Add Shortcut</b>, and paste the same token when it asks.</>
+                      : <>Now tap <b>Get the Shortcut</b>, then <b>Add Shortcut</b>, and paste the token when it asks.</>}
+                  </div>
                   {!copied && <div className="code-line">{token}</div>}
                   <div className="row">
-                    <a className="btn primary" href={shortcutUrl} target="_blank" rel="noreferrer">Get the Shortcut</a>
+                    <a className="btn primary" href={shortcutUrl} target="_blank" rel="noreferrer">{both ? "1. Shortcut for links" : "Get the Shortcut"}</a>
+                    {both && <a className="btn primary" href={filesUrl} target="_blank" rel="noreferrer">2. Shortcut for files</a>}
                     <button className="btn sm" onClick={() => copy(token, setNote)}>{copied ? "Copy token again" : "Copy token"}</button>
                   </div>
                   <div className="muted small">If iPhone says it can't open shared shortcuts, turn on Settings → Apps → Shortcuts → Private Sharing (Allow Untrusted Shortcuts on older iOS), then tap the link again.</div>
