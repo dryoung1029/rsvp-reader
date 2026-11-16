@@ -305,8 +305,8 @@ export default function Help({ inboxEmail, signedIn }) {
         </p>
         <ol>
           <li>Tap <b>Set up the Share button</b>. Your personal token is copied.</li>
-          <li>Tap <b>Get the Shortcut</b>, then <b>Add Shortcut</b>.</li>
-          <li>When it asks for your token, paste it.</li>
+          <li>Tap the Shortcut button, then <b>Add Shortcut</b>. There may be two: one for links and one for files. Add both.</li>
+          <li>When each one asks for your token, paste it. It's the same token for both.</li>
         </ol>
         <p>From then on, RAFAS (or "Send to RAFAS") appears when you tap Share.</p>
 
