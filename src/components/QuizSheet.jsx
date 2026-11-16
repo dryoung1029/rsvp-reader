@@ -12,6 +12,10 @@ export default function QuizSheet({ docId, title, prepare, onClose, onDone }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
+  const [deadline, setDeadline] = useState(0);
+  const [left, setLeft] = useState(0);
+  const answersRef = React.useRef([]);
+  answersRef.current = answers;
 
   async function load() {
     setBusy(true);
@@ -22,6 +26,8 @@ export default function QuizSheet({ docId, title, prepare, onClose, onDone }) {
       await prepare();
       const { quiz: q } = await api("/api/quiz", { method: "POST", body: { docId } });
       setQuiz(q);
+      setDeadline(Date.now() + q.secondsLeft * 1000);
+      setLeft(q.secondsLeft);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -30,10 +36,10 @@ export default function QuizSheet({ docId, title, prepare, onClose, onDone }) {
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  async function submit() {
+  async function submit(final = answers) {
     setBusy(true);
     try {
-      const r = await api(`/api/quiz/${quiz.id}/answer?today=${localDay()}`, { method: "POST", body: { answers } });
+      const r = await api(`/api/quiz/${quiz.id}/answer?today=${localDay()}`, { method: "POST", body: { answers: final } });
       setResult(r);
       announceAchievements(r.unlocked);
       onDone(r);
@@ -44,6 +50,18 @@ export default function QuizSheet({ docId, title, prepare, onClose, onDone }) {
     }
   }
 
+  // Countdown; when time runs out, whatever is chosen is submitted.
+  useEffect(() => {
+    if (!quiz || result || !deadline) return undefined;
+    const t = setInterval(() => {
+      const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setLeft(s);
+      if (s === 0) { clearInterval(t); submit(answersRef.current); }
+    }, 250);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quiz, result, deadline]);
+
   const ready = quiz && answers.filter((a) => a != null).length === quiz.questions.length;
 
   return (
@@ -52,10 +70,13 @@ export default function QuizSheet({ docId, title, prepare, onClose, onDone }) {
       {error && <p className="error">{error}</p>}
       {quiz && !result && (
         <>
-          <p className="muted small">
-            Answer all 3 correctly to count these {quiz.words.toLocaleString()} words toward achievements and the competition.
-            {quiz.attempt > 1 ? " Last try for this reading." : ""}
-          </p>
+          <div className="quiz-head">
+            <p className="muted small">
+              Answer all 3 correctly to count this reading toward achievements and the competition.
+              {quiz.attempt > 1 ? " Last try for this reading." : ""}
+            </p>
+            <div className={`quiz-timer${left <= 15 ? " low" : ""}`} aria-live="off" aria-label={`${left} seconds left`}>{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</div>
+          </div>
           <ol className="quiz">
             {quiz.questions.map((q, i) => (
               <li key={i}>
@@ -76,15 +97,15 @@ export default function QuizSheet({ docId, title, prepare, onClose, onDone }) {
               </li>
             ))}
           </ol>
-          <button className="btn primary" disabled={!ready || busy} onClick={submit}>{busy ? "Checking..." : "Check answers"}</button>
+          <button className="btn primary" disabled={!ready || busy} onClick={() => submit()}>{busy ? "Checking..." : "Check answers"}</button>
         </>
       )}
       {quiz && result && (
         <>
           <div className={`quiz-result ${result.passed ? "pass" : "fail"}`}>
             {result.passed
-              ? <><b>3 for 3.</b> {result.words.toLocaleString()} words now count toward your achievements and the competition.{result.finished ? " And that's the whole document finished." : ""}</>
-              : <><b>Not quite.</b> {result.attemptsLeft ? "You get one more try with new questions." : "No tries left for this reading. It still counts in your own stats, just not for achievements or the competition."}</>}
+              ? <><b>3 for 3.</b> {result.counted ? `${result.counted.toLocaleString()} words now count toward your achievements and the competition.` : "Nice. You'd already counted this part, so nothing new to add."}{result.finished ? " And that's the whole document finished." : ""}</>
+              : <><b>{result.timedOut ? "Time's up." : "Not quite."}</b> {result.attemptsLeft ? "You get one more try with new questions." : "No tries left for this reading. It still counts in your own stats, just not for achievements or the competition."}</>}
           </div>
           <ol className="quiz">
             {quiz.questions.map((q, i) => {

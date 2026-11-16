@@ -6,6 +6,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { HttpError, json, readJson } from "./util.js";
 import { requireUser } from "./auth.js";
 import { evaluate, logEvent, utcDay } from "./game.js";
+import {
+  flag, mergeRanges, rangeLength, newWordsIn, diversity, fingerprints,
+  DAILY_COUNTED_CAP, FINISH_COVERAGE, QUIZ_SECONDS, QUIZ_GRACE_MS, MIN_DIVERSITY, SEND_MIN_WORDS
+} from "./fairplay.js";
 
 export const QUIZ_MIN_WORDS = 300;   // a quiz is offered once this much reading is waiting
 const QUIZ_FLOOR_WORDS = 120;        // smallest stretch you can ask to be quizzed on
@@ -41,6 +45,7 @@ Given a passage someone just read, write exactly 3 multiple-choice questions tha
 - Ask about ideas, events, claims, reasons or who-did-what that the passage states clearly. Avoid trick questions, exact numbers, dates or spellings unless they are central, and anything that needs outside knowledge.
 - Give 4 options each: one clearly correct, three plausible but clearly wrong for anyone who read it. Keep options short and similar in length.
 - explanation: one short sentence saying where the passage supports the answer.
+- Paraphrase: don't copy distinctive phrases from the passage into questions or options, so the answer can't be found by searching the text for the same words.
 - Plain language. No "according to the passage" filler.`;
 
 // ---------- Text ----------
@@ -153,7 +158,30 @@ export async function pendingSummary(env, userId) {
 
 function publicQuiz(row, attemptsLeft) {
   const questions = JSON.parse(row.questions).map(({ question, options }) => ({ question, options }));
-  return { id: row.id, docId: row.doc_id, words: row.words, attempt: row.attempt, attemptsLeft, questions };
+  return {
+    id: row.id, docId: row.doc_id, words: row.words, attempt: row.attempt, attemptsLeft, questions,
+    secondsLeft: Math.max(0, Math.round(((row.expires_at || 0) - Date.now()) / 1000)), seconds: QUIZ_SECONDS
+  };
+}
+
+const placeholders = (n) => Array.from({ length: n }, () => "?").join(",");
+
+async function setSessions(env, userId, ids, verified) {
+  if (!ids.length) return;
+  await env.DB.prepare(`UPDATE reading_sessions SET verified = ? WHERE user_id = ? AND verified = 0 AND id IN (${placeholders(ids.length)})`)
+    .bind(verified, userId, ...ids).run();
+}
+
+// Coverage is shared between a document and any copy of it (matched by fingerprint),
+// so the same text can't be counted twice by adding it again.
+function coverKeys(docId, fps) {
+  return [`doc:${docId}`, ...(fps || []).map((f) => `fp:${f}`)];
+}
+
+async function loadCoverage(env, userId, keys) {
+  const { results } = await env.DB.prepare(`SELECT ranges FROM doc_coverage WHERE user_id = ? AND cover_key IN (${placeholders(keys.length)})`)
+    .bind(userId, ...keys).all();
+  return mergeRanges(results.flatMap((r) => JSON.parse(r.ranges)));
 }
 
 // ---------- Handlers ----------
@@ -162,28 +190,46 @@ async function createQuiz(request, env, user) {
   const body = await readJson(request);
   const docId = String(body.docId || "");
   if (!ID_RE.test(docId)) throw new HttpError(400, "Pick a document first.");
-  const doc = await env.DB.prepare("SELECT id, title FROM documents WHERE id = ? AND user_id = ?").bind(docId, user.id).first();
+  const doc = await env.DB.prepare("SELECT id, title, word_count FROM documents WHERE id = ? AND user_id = ?").bind(docId, user.id).first();
   if (!doc) throw new HttpError(404, "That document isn't in your library on the server yet. Try again in a moment.");
 
   const sessions = await pendingSessions(env, user.id, docId);
-  const words = sessions.reduce((a, s) => a + s.words, 0);
+  const words = sessions.reduce((a, x) => a + x.words, 0);
   if (words < QUIZ_FLOOR_WORDS) throw new HttpError(409, "Read a little more of this first. Quizzes cover at least a couple of minutes of reading.");
-  const ids = sessions.map((s) => s.id);
+  const ids = sessions.map((x) => x.id);
   const key = JSON.stringify(ids);
 
-  // Reuse an open quiz for exactly these sittings; count earlier tries on them.
+  // Reuse an open quiz for exactly these sittings (unless its time ran out); count earlier tries.
   const { results: earlier } = await env.DB.prepare(
     "SELECT * FROM quizzes WHERE user_id = ? AND doc_id = ? AND session_ids = ? ORDER BY created_at"
   ).bind(user.id, docId, key).all();
+  let failed = earlier.filter((q) => q.status === "failed").length;
   const open = earlier.find((q) => q.status === "open");
-  const failed = earlier.filter((q) => q.status === "failed").length;
-  if (open) return json({ quiz: publicQuiz(open, MAX_ATTEMPTS - failed) });
-  if (failed >= MAX_ATTEMPTS) throw new HttpError(409, "No tries left for that reading.");
+  if (open) {
+    if ((open.expires_at || 0) + QUIZ_GRACE_MS > Date.now()) return json({ quiz: publicQuiz(open, MAX_ATTEMPTS - failed) });
+    await env.DB.prepare("UPDATE quizzes SET status = 'failed', answered_at = ? WHERE id = ?").bind(Date.now(), open.id).run();
+    failed += 1;
+  }
+  if (failed >= MAX_ATTEMPTS) {
+    await setSessions(env, user.id, ids, -1);
+    throw new HttpError(409, "No tries left for that reading. It still counts in your own stats.");
+  }
 
   const text = await docText(env, docId);
   const allWords = text.split(" ");
-  const start = Math.min(...sessions.map((s) => s.start_word ?? 0));
-  const end = Math.max(...sessions.map((s) => s.end_word ?? start));
+  const start = Math.min(...sessions.map((x) => x.start_word ?? 0));
+  const end = Math.min(allWords.length - 1, Math.max(...sessions.map((x) => x.end_word ?? start)));
+
+  // Remember what this text looks like, and how varied it is.
+  const fps = await fingerprints(allWords);
+  const quality = diversity(allWords.slice(0, 20000));
+  await env.DB.prepare("UPDATE documents SET fingerprints = ?, quality = ? WHERE id = ?").bind(JSON.stringify(fps), quality, docId).run();
+  const passageWords = allWords.slice(start, end + 1);
+  if (quality < MIN_DIVERSITY || diversity(passageWords) < MIN_DIVERSITY) {
+    await setSessions(env, user.id, ids, -4);
+    await flag(env, user.id, "repetitive", `"${doc.title}" is too repetitive to count`).run();
+    throw new HttpError(422, "This text is too repetitive to count toward achievements. It still counts in your own stats.");
+  }
   const passage = passageFor(allWords, start, end);
 
   let questions;
@@ -198,14 +244,100 @@ async function createQuiz(request, env, user) {
   }
   if (!questions) questions = clozeQuestions(passage.text);
 
+  const now = Date.now();
   const row = {
     id: crypto.randomUUID(), user_id: user.id, doc_id: docId, session_ids: key, words,
-    questions: JSON.stringify(questions), source, attempt: failed + 1, status: "open", created_at: Date.now()
+    questions: JSON.stringify(questions), source, attempt: failed + 1, status: "open", created_at: now,
+    expires_at: now + QUIZ_SECONDS * 1000
   };
   await env.DB.prepare(
-    "INSERT INTO quizzes (id, user_id, doc_id, session_ids, words, questions, source, attempt, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).bind(row.id, row.user_id, row.doc_id, row.session_ids, row.words, row.questions, row.source, row.attempt, row.status, row.created_at).run();
+    "INSERT INTO quizzes (id, user_id, doc_id, session_ids, words, questions, source, attempt, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).bind(row.id, row.user_id, row.doc_id, row.session_ids, row.words, row.questions, row.source, row.attempt, row.status, row.created_at, row.expires_at).run();
   return json({ quiz: publicQuiz(row, MAX_ATTEMPTS - failed) }, 201);
+}
+
+// Credits newly read words from passed sittings: rereading counts once, there's a
+// daily ceiling, and finishing or a send only counts once most of it has been read.
+async function creditReading(env, user, quiz, ids, today) {
+  const statements = [];
+  const doc = await env.DB.prepare("SELECT id, word_count, source, finish_counted, edited_at, fingerprints, title FROM documents WHERE id = ? AND user_id = ?")
+    .bind(quiz.doc_id, user.id).first();
+  if (!doc) return { statements, credited: 0, finished: false };
+  const keys = coverKeys(doc.id, doc.fingerprints ? JSON.parse(doc.fingerprints) : []);
+  let covered = await loadCoverage(env, user.id, keys);
+
+  const { results: sessions } = await env.DB.prepare(
+    `SELECT id, day, words, ms, wpm, start_word, end_word FROM reading_sessions WHERE user_id = ? AND verified = 0 AND id IN (${placeholders(ids.length)}) ORDER BY started_at, id`
+  ).bind(user.id, ...ids).all();
+
+  const days = [...new Set(sessions.map((x) => x.day))];
+  const { results: dayRows } = days.length
+    ? await env.DB.prepare(`SELECT day, verified_words FROM reading_days WHERE user_id = ? AND day IN (${placeholders(days.length)})`).bind(user.id, ...days).all()
+    : { results: [] };
+  const dayUsed = new Map(dayRows.map((r) => [r.day, r.verified_words]));
+  const best = await env.DB.prepare("SELECT MAX(wpm) AS w FROM reading_sessions WHERE user_id = ? AND verified = 1 AND counted_words >= 500").bind(user.id).first();
+
+  let credited = 0;
+  const byDay = new Map();
+  for (const x of sessions) {
+    const a = Math.max(0, x.start_word ?? 0);
+    const b = Math.min(doc.word_count - 1, x.end_word ?? a);
+    let fresh = b >= a ? Math.min(x.words, newWordsIn([a, b], covered)) : 0;
+    if (b >= a) covered = mergeRanges([...covered, [a, b]]);
+    const used = dayUsed.get(x.day) || 0;
+    if (used + fresh > DAILY_COUNTED_CAP) {
+      statements.push(flag(env, user.id, "daily cap", `hit the daily limit on ${x.day}`));
+      fresh = Math.max(0, DAILY_COUNTED_CAP - used);
+    }
+    dayUsed.set(x.day, used + fresh);
+    const freshMs = x.words ? Math.round((x.ms * fresh) / x.words) : 0;
+    statements.push(env.DB.prepare("UPDATE reading_sessions SET verified = 1, counted_words = ?, doc_words = ? WHERE id = ?").bind(fresh, doc.word_count, x.id));
+    if (fresh) {
+      const d = byDay.get(x.day) || { words: 0, ms: 0 };
+      d.words += fresh; d.ms += freshMs; byDay.set(x.day, d);
+      credited += fresh;
+    }
+    if (fresh >= 500 && best?.w && x.wpm > best.w + 200) {
+      statements.push(flag(env, user.id, "speed jump", `${x.wpm} wpm after a previous best of ${best.w}`));
+    }
+  }
+  for (const [day, d] of byDay) {
+    statements.push(env.DB.prepare(
+      `INSERT INTO reading_days (user_id, day, words, ms, verified_words, verified_ms) VALUES (?, ?, 0, 0, ?, ?)
+       ON CONFLICT (user_id, day) DO UPDATE SET verified_words = verified_words + excluded.verified_words, verified_ms = verified_ms + excluded.verified_ms`
+    ).bind(user.id, day, d.words, d.ms));
+  }
+  for (const k of keys) {
+    statements.push(env.DB.prepare(
+      "INSERT INTO doc_coverage (user_id, cover_key, ranges) VALUES (?, ?, ?) ON CONFLICT (user_id, cover_key) DO UPDATE SET ranges = excluded.ranges"
+    ).bind(user.id, k, JSON.stringify(covered)));
+  }
+
+  // Finished = most of the document has counted (skipping to the end doesn't do it).
+  const read = rangeLength(covered);
+  let finished = false;
+  if (!doc.finish_counted && doc.word_count > 0 && read >= doc.word_count * FINISH_COVERAGE) {
+    finished = true;
+    statements.push(env.DB.prepare("UPDATE documents SET finish_counted = 1, finished_at = COALESCE(finished_at, ?) WHERE id = ?").bind(Date.now(), doc.id));
+    // Edited documents count as finished, but not toward the long-book achievement.
+    statements.push(logEvent(env, user.id, "finished", { value: doc.edited_at ? 0 : doc.word_count, meta: doc.source, day: today }));
+  }
+
+  // A document someone sent you: their send counts once you've read some of it.
+  const senders = [];
+  if (read >= SEND_MIN_WORDS) {
+    const { results: sends } = await env.DB.prepare("SELECT * FROM sends WHERE recipient_doc_id = ? AND recipient_id = ? AND counted = 0").bind(doc.id, user.id).all();
+    for (const snd of sends) {
+      const dup = await env.DB.prepare("SELECT 1 FROM sends WHERE sender_id = ? AND recipient_id = ? AND source_doc_id = ? AND counted = 1")
+        .bind(snd.sender_id, snd.recipient_id, snd.source_doc_id).first();
+      statements.push(env.DB.prepare("UPDATE sends SET counted = 1 WHERE id = ?").bind(snd.id));
+      if (dup) continue;
+      statements.push(logEvent(env, snd.sender_id, "sent", { value: 1 }));
+      statements.push(logEvent(env, user.id, "received", { value: 1 }));
+      senders.push(snd.sender_id);
+    }
+  }
+  return { statements, credited, finished, senders };
 }
 
 async function answerQuiz(request, env, user, quizId) {
@@ -215,57 +347,34 @@ async function answerQuiz(request, env, user, quizId) {
   const body = await readJson(request);
   const answers = Array.isArray(body.answers) ? body.answers.map(Number) : [];
   const questions = JSON.parse(quiz.questions);
-  const results = questions.map((q, i) => ({ correct: answers[i] === q.answer, answer: q.answer, chosen: answers[i] ?? null, explanation: q.explanation }));
+  const timedOut = Date.now() > (quiz.expires_at || Infinity) + QUIZ_GRACE_MS;
+  const results = questions.map((q, i) => ({ correct: !timedOut && answers[i] === q.answer, answer: q.answer, chosen: answers[i] ?? null, explanation: q.explanation }));
   const passed = results.every((r) => r.correct);
-  const now = Date.now();
   const ids = JSON.parse(quiz.session_ids);
   const today = new URL(request.url).searchParams.get("today") || utcDay();
 
-  const statements = [env.DB.prepare("UPDATE quizzes SET status = ?, answered_at = ? WHERE id = ?").bind(passed ? "passed" : "failed", now, quiz.id)];
-  let finishedNow = false;
-
+  const statements = [env.DB.prepare("UPDATE quizzes SET status = ?, answered_at = ? WHERE id = ?").bind(passed ? "passed" : "failed", Date.now(), quiz.id)];
+  let credit = { credited: 0, finished: false, senders: [] };
   if (passed) {
-    const placeholders = ids.map(() => "?").join(",");
-    const { results: sessions } = await env.DB.prepare(
-      `SELECT id, day, words, ms, end_word FROM reading_sessions WHERE user_id = ? AND verified = 0 AND id IN (${placeholders})`
-    ).bind(user.id, ...ids).all();
-    statements.push(env.DB.prepare(
-      `UPDATE reading_sessions SET verified = 1, doc_words = (SELECT word_count FROM documents d WHERE d.id = reading_sessions.doc_id)
-       WHERE user_id = ? AND id IN (${placeholders})`
-    ).bind(user.id, ...ids));
-    const byDay = new Map();
-    for (const s of sessions) {
-      const d = byDay.get(s.day) || { words: 0, ms: 0 };
-      d.words += s.words; d.ms += s.ms; byDay.set(s.day, d);
-    }
-    for (const [day, d] of byDay) {
-      statements.push(env.DB.prepare(
-        `INSERT INTO reading_days (user_id, day, words, ms, verified_words, verified_ms) VALUES (?, ?, 0, 0, ?, ?)
-         ON CONFLICT (user_id, day) DO UPDATE SET verified_words = verified_words + excluded.verified_words, verified_ms = verified_ms + excluded.verified_ms`
-      ).bind(user.id, day, d.words, d.ms));
-    }
+    credit = await creditReading(env, user, quiz, ids, today);
+    statements.push(...credit.statements);
     statements.push(logEvent(env, user.id, "quiz", { value: quiz.attempt, meta: quiz.source, day: today }));
-    // Reaching the end counts as finishing the document only once the last stretch is verified.
-    const doc = await env.DB.prepare("SELECT word_count, source, finished_at, finish_counted FROM documents WHERE id = ? AND user_id = ?").bind(quiz.doc_id, user.id).first();
-    const reachedEnd = doc && sessions.some((s) => s.end_word != null && s.end_word >= doc.word_count - 2);
-    if (doc && !doc.finish_counted && (doc.finished_at || reachedEnd)) {
-      finishedNow = true;
-      statements.push(env.DB.prepare("UPDATE documents SET finish_counted = 1, finished_at = COALESCE(finished_at, ?) WHERE id = ?").bind(now, quiz.doc_id));
-      statements.push(logEvent(env, user.id, "finished", { value: doc.word_count, meta: doc.source, day: today }));
-    }
   } else if (quiz.attempt >= MAX_ATTEMPTS) {
     // Out of tries: this stretch stays in personal stats but won't count for the game.
-    const placeholders = ids.map(() => "?").join(",");
-    statements.push(env.DB.prepare(`UPDATE reading_sessions SET verified = -1 WHERE user_id = ? AND verified = 0 AND id IN (${placeholders})`).bind(user.id, ...ids));
+    statements.push(env.DB.prepare(`UPDATE reading_sessions SET verified = -1 WHERE user_id = ? AND verified = 0 AND id IN (${placeholders(ids.length)})`).bind(user.id, ...ids));
   }
   await env.DB.batch(statements);
 
   const unlocked = passed ? await evaluate(env, user.id, today) : [];
+  // Senders whose send just counted get their achievements awarded now and shown next time they open RAFAS.
+  for (const senderId of credit.senders || []) await evaluate(env, senderId, today, { claim: false });
   return json({
     passed,
+    timedOut,
     results,
     words: quiz.words,
-    finished: finishedNow,
+    counted: credit.credited,
+    finished: credit.finished,
     attemptsLeft: passed ? 0 : Math.max(0, MAX_ATTEMPTS - quiz.attempt),
     unlocked
   });

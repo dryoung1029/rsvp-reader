@@ -913,8 +913,8 @@ export default function Reader({ user, config, visible, path }) {
                 {navigator.clipboard?.readText && <button className="btn" onClick={pasteFromClipboard} disabled={busy}>Paste from clipboard</button>}
               </div>
               <div className="muted small kbd-only">Tip: you can also drag a file onto the reader.</div>
-              {docId && <button className="btn ghost" onClick={() => setShowText((s) => !s)}>{showText ? "Hide text" : "View or edit this document's text"}</button>}
-              {showText && <textarea className="field" value={text} onChange={(e) => editText(e.target.value)} rows={10} />}
+              {docId && sheet !== "quiz" && <button className="btn ghost" onClick={() => setShowText((s) => !s)}>{showText ? "Hide text" : "View or edit this document's text"}</button>}
+              {showText && sheet !== "quiz" && <textarea className="field" value={text} onChange={(e) => editText(e.target.value)} rows={10} />}
             </section>
 
             <section className="panel" aria-label="Settings">

@@ -10,6 +10,7 @@ const SECTIONS = [
   ["pacing", "Pacing and chapters"],
   ["progress", "Progress and family board"],
   ["achievements", "Achievements, levels and competitions"],
+  ["rules", "Achievement rules"],
   ["sending", "Sending to family"],
   ["bookmarklet", "Saving pages on a computer"],
   ["keys", "Keyboard shortcuts"],
@@ -175,9 +176,8 @@ export default function Help({ inboxEmail, signedIn }) {
           See them all, with your progress toward each, under <Link to="/progress/achievements">Progress → Achievements</Link>.
         </p>
         <p>
-          Speed achievements count a whole sitting (from Play to Pause) at the slowest speed you used during it, so
-          you have to hold the pace. They only count in documents of at least 2,000 words, and only once you've passed
-          the quiz on that reading. Sittings that went by faster than the speed setting allows don't count.
+          Speed achievements count a whole sitting, from Play to Pause, at the slowest speed you used during it, so you
+          have to hold the pace.
         </p>
         <h3>Quick checks (quizzes)</h3>
         <p>
@@ -205,12 +205,30 @@ export default function Help({ inboxEmail, signedIn }) {
         <p>All-time rankings for level, words, achievements, best streak, top speed and titles won, plus a feed of who unlocked what.</p>
       </section>
 
+      <section id="rules">
+        <h2>Achievement rules</h2>
+        <p>Everyone plays by the same rules, so the leaderboard means something:</p>
+        <ul>
+          <li>Reading counts toward achievements, levels, competitions and leaderboards after you pass the quick check on it. Everything you read always counts in your own stats.</li>
+          <li>Each part of a document counts once. Rereading is fine, it just doesn't add again, and that includes adding the same text a second time.</li>
+          <li>Speed records need a full sitting at that speed, in a full-length document.</li>
+          <li>A document counts as finished when you've actually read most of it.</li>
+          <li>Reading counts on the day you do it, and on one device at a time.</li>
+          <li>Text has to be real reading. Very repetitive text doesn't count.</li>
+          <li>Quick checks are timed, and the document's text is hidden while you answer.</li>
+          <li>A streak day needs a real reading session, not just a few words.</li>
+          <li>Sending a document counts once the other person reads it.</li>
+          <li>There's a generous daily limit on how much can count.</li>
+        </ul>
+        <p className="muted small">The site admin can see notes about anything unusual. If something you read didn't count and you think it should have, ask them.</p>
+      </section>
+
       <section id="sending">
         <h2>Sending to family</h2>
         <p>
           Press <b>Send to…</b> under the reader and pick someone. They get their own copy at the top of their library,
           starting from the beginning, plus an email letting them know. You can add a short note. Your copy and your
-          place in it don't change.
+          place in it don't change. It counts toward your sending achievements once they've read it.
         </p>
       </section>
 

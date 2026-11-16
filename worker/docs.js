@@ -125,6 +125,13 @@ export async function handleDocs(request, env, pathname) {
       await writeText(env, id, bytes);
       const url = new URL(request.url);
       const isEdit = url.searchParams.get("edit") === "1";
+      if (isEdit) {
+        // Reading still waiting for a quiz no longer matches the text, so it's dropped.
+        await env.DB.batch([
+          env.DB.prepare("UPDATE documents SET edited_at = ? WHERE id = ?").bind(Date.now(), id),
+          env.DB.prepare("UPDATE reading_sessions SET verified = -5 WHERE user_id = ? AND doc_id = ? AND verified = 0").bind(user.id, id)
+        ]);
+      }
       await env.DB.prepare(
         `UPDATE documents SET text_bytes = ?, updated_at = ?, text_version = text_version + ?,
            chapters = CASE WHEN ? = 1 THEN '[]' ELSE chapters END,
@@ -198,8 +205,8 @@ async function sendDoc(request, env, user, id) {
        FROM documents WHERE id = ?`
     ).bind(newId, recipient.id, now, now, now, user.name || user.email, id),
     env.DB.prepare("INSERT INTO document_text (doc_id, seq, data) SELECT ?, seq, data FROM document_text WHERE doc_id = ?").bind(newId, id),
-    logEvent(env, user.id, "sent", { value: 1 }),
-    logEvent(env, recipient.id, "received", { value: 1 })
+    // Counts toward "send" achievements once the recipient reads some of it (worker/quiz.js).
+    env.DB.prepare("INSERT INTO sends (sender_id, recipient_id, source_doc_id, recipient_doc_id, created_at) VALUES (?, ?, ?, ?, ?)").bind(user.id, recipient.id, id, newId, now)
   ]);
 
   const from = user.name || user.email;

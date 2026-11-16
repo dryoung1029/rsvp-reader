@@ -7,6 +7,33 @@ function copy(text, setNote) {
   navigator.clipboard?.writeText(text).then(() => setNote("Copied."), () => setNote("Couldn't copy. Select the text and copy it."));
 }
 
+// Notes about unusual activity, for a person to look at. They don't change anyone's score.
+function FairPlay() {
+  const [notes, setNotes] = useState(null);
+  useEffect(() => { api("/api/admin/fairplay").then((r) => setNotes(r.notes)).catch(() => setNotes([])); }, []);
+  return (
+    <section className="panel">
+      <h2>Fair play</h2>
+      <p className="muted small">
+        Things the app noticed in the last 30 days that a person might want to look at. The rules are already applied
+        automatically; nothing here changes anyone's score. Only admins see this.
+      </p>
+      {notes == null ? <div className="muted small">Loading...</div> : notes.length ? (
+        <div className="table-wrap">
+          <table className="list">
+            <thead><tr><th>Who</th><th>What</th><th>When</th></tr></thead>
+            <tbody>
+              {notes.slice(0, 60).map((n, i) => (
+                <tr key={i}><td><b>{n.name}</b></td><td><span className="pill">{n.kind}</span><div className="muted small">{n.detail}</div></td><td className="small">{formatAgo(n.at)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <div className="muted small">Nothing unusual.</div>}
+    </section>
+  );
+}
+
 function InviteAdmin() {
   const [invites, setInvites] = useState([]);
   const [users, setUsers] = useState([]);
@@ -309,6 +336,7 @@ export default function Account({ user, setUser, config, onSignOut }) {
       <Bookmarklet />
 
       {user.isAdmin && <InviteAdmin />}
+      {user.isAdmin && <FairPlay />}
 
       <section className="panel">
         <h2>Delete account</h2>

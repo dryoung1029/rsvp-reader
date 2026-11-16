@@ -41,12 +41,12 @@ export const ACHIEVEMENTS = [
 
   // Speed: the speed setting you held for a whole sitting of at least 500 (or 1,000) words,
   // in a document of at least SPEED_MIN_DOC_WORDS words, and passed the quiz on it
-  { id: "speed_300", group: "Speed", icon: "🚲", title: "Cruising", desc: "Read 500 words in one sitting at 300 wpm or faster, in a document of 2,000+ words.", points: 5, ...speed(300, 500) },
-  { id: "speed_400", group: "Speed", icon: "🛵", title: "Picking Up Pace", desc: "Read 500 words in one sitting at 400 wpm or faster, in a document of 2,000+ words.", points: 10, ...speed(400, 500) },
-  { id: "speed_500", group: "Speed", icon: "🚗", title: "Fast Lane", desc: "Read 500 words in one sitting at 500 wpm or faster, in a document of 2,000+ words.", points: 20, ...speed(500, 500) },
-  { id: "speed_swizz", group: "Speed", icon: "⚡", title: "Read As Fast As Swizz", desc: "Read 1,000 words in one sitting at 600 wpm or faster, in a document of 2,000+ words.", points: 40, ...speed(600, 1000) },
-  { id: "speed_750", group: "Speed", icon: "🚄", title: "Blur", desc: "Read 1,000 words in one sitting at 750 wpm or faster, in a document of 2,000+ words.", points: 60, ...speed(750, 1000) },
-  { id: "speed_900", group: "Speed", icon: "🚀", title: "Light Speed", desc: "Read 1,000 words in one sitting at 900 wpm or faster, in a document of 2,000+ words.", points: 100, ...speed(900, 1000) },
+  { id: "speed_300", group: "Speed", icon: "🚲", title: "Cruising", desc: "Read 500 words in one sitting at 300 wpm or faster, in a full-length document.", points: 5, ...speed(300, 500) },
+  { id: "speed_400", group: "Speed", icon: "🛵", title: "Picking Up Pace", desc: "Read 500 words in one sitting at 400 wpm or faster, in a full-length document.", points: 10, ...speed(400, 500) },
+  { id: "speed_500", group: "Speed", icon: "🚗", title: "Fast Lane", desc: "Read 500 words in one sitting at 500 wpm or faster, in a full-length document.", points: 20, ...speed(500, 500) },
+  { id: "speed_swizz", group: "Speed", icon: "⚡", title: "Read As Fast As Swizz", desc: "Read 1,000 words in one sitting at 600 wpm or faster, in a full-length document.", points: 40, ...speed(600, 1000) },
+  { id: "speed_750", group: "Speed", icon: "🚄", title: "Blur", desc: "Read 1,000 words in one sitting at 750 wpm or faster, in a full-length document.", points: 60, ...speed(750, 1000) },
+  { id: "speed_900", group: "Speed", icon: "🚀", title: "Light Speed", desc: "Read 1,000 words in one sitting at 900 wpm or faster, in a full-length document.", points: 100, ...speed(900, 1000) },
 
   // Streaks
   { id: "streak_3", group: "Streaks", icon: "🔥", title: "Three in a Row", desc: "Read 3 days in a row.", points: 10, ...streak(3) },

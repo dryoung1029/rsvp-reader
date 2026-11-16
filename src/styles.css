@@ -467,3 +467,8 @@ table.leader td { vertical-align: middle; }
 .quiz-banner { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--accent); background: var(--accent-soft); font-size: 14px; }
 .quiz-banner b { color: var(--text); }
 .quiz-waiting { margin-top: 8px; font-size: 13px; }
+
+.quiz-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.quiz-head p { margin: 0; }
+.quiz-timer { flex-shrink: 0; font-family: var(--mono); font-weight: 900; font-size: 20px; padding: 4px 10px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border); }
+.quiz-timer.low { color: var(--accent); border-color: var(--accent); }

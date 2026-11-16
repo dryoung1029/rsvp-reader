@@ -78,7 +78,11 @@ function createTracker(userId) {
       if (playingSince == null) playingSince = Date.now();
       if (!session) {
         const now = new Date();
-        session = { day: localDay(now), hour: now.getHours(), words: 0, ms: 0, wpm, docId: docId || null, startWord: startWord ?? null, endWord: startWord ?? null };
+        session = {
+          day: localDay(now), hour: now.getHours(), words: 0, ms: 0, wpm,
+          docId: docId || null, startWord: startWord ?? null, endWord: startWord ?? null,
+          startedAt: now.getTime(), endedAt: now.getTime(), tzOffset: now.getTimezoneOffset()
+        };
       }
     },
     // A sitting counts at the slowest speed used during it.
@@ -87,6 +91,7 @@ function createTracker(userId) {
       checkpoint();
       playingSince = null;
       if (session && endWord != null) session.endWord = endWord;
+      if (session) session.endedAt = Date.now();
       endSession();
       save();
     },
@@ -101,7 +106,7 @@ function createTracker(userId) {
       pending = { days: {}, sessions: [] };
       save();
       const today = localDay();
-      flushing = api("/api/stats", { method: "POST", body: { today, days, sessions: snapshot.sessions }, keepalive })
+      flushing = api("/api/stats", { method: "POST", body: { today, sentAt: Date.now(), days, sessions: snapshot.sessions }, keepalive })
         .then((result) => {
           announceAchievements(result.unlocked);
           if (result.quiz) window.dispatchEvent(new CustomEvent("rafas:quiz-pending", { detail: result.quiz }));

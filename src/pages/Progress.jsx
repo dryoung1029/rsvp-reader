@@ -143,7 +143,7 @@ function GoalCard({ goal, today, onSet }) {
         </>
       ) : (
         <>
-          <p className="muted small">How many words do you want to read each day? Hitting it 7 times earns an achievement.</p>
+          <p className="muted small">How many words do you want to read each day? Hitting a real goal 7 times earns an achievement.</p>
           <div className="row">
             {GOAL_PRESETS.map((g) => <button key={g} className={`btn sm${g === goal ? " primary" : ""}`} onClick={() => { onSet(g); setEditing(false); }}>{g.toLocaleString()}</button>)}
             <form className="row" onSubmit={(e) => { e.preventDefault(); const n = Number(custom); if (n > 0) { onSet(n); setEditing(false); } }}>
@@ -266,7 +266,7 @@ function JoinBoard({ onJoin }) {
 
 const CATEGORIES = [
   ["words", "Most words", (v) => `${v.toLocaleString()} words`],
-  ["speed", "Top speed", (v) => `${v} wpm`, "Fastest sitting of 1,000+ words, in a document of 2,000+ words"],
+  ["speed", "Top speed", (v) => `${v} wpm`, "Fastest full sitting in a full-length document"],
   ["finished", "Most finished", (v) => `${v} ${v === 1 ? "document" : "documents"}`],
   ["days", "Most days read", (v) => `${v} ${v === 1 ? "day" : "days"}`]
 ];

@@ -3,6 +3,16 @@ import { HttpError, json, readJson } from "./util.js";
 import { requireUser } from "./auth.js";
 import { evaluate } from "./game.js";
 import { pendingSummary } from "./quiz.js";
+import { flag, MAX_DAYS_BACK } from "./fairplay.js";
+
+// A device's local calendar day for a server timestamp, given its UTC offset
+// (JavaScript's getTimezoneOffset: minutes to add to local time to get UTC).
+function localDate(ms, tzOffset) {
+  return new Date(ms - tzOffset * 60000).toISOString().slice(0, 10);
+}
+function localHour(ms, tzOffset) {
+  return new Date(ms - tzOffset * 60000).getUTCHours();
+}
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -85,23 +95,65 @@ export async function handleStats(request, env, pathname) {
          ON CONFLICT (user_id, day) DO UPDATE SET words = words + excluded.words, ms = ms + excluded.ms`
       ).bind(user.id, e.day, words, ms));
     }
-    // Sittings (Play until Pause), used for speed and time-of-day achievements.
+    // Sittings (Play until Pause). Only sittings that pass these checks can
+    // later count toward the game; everything still counts in personal stats.
+    // verified: 0 waiting for a quiz, -2 overlapped another device, -3 failed a check.
     const now = Date.now();
+    const sentAt = Number(body.sentAt);
+    const skew = Number.isFinite(sentAt) ? now - sentAt : null; // corrects a wrong device clock
+    const incoming = [];
     for (const sess of Array.isArray(body.sessions) ? body.sessions.slice(0, 50) : []) {
       if (!DAY_RE.test(String(sess.day || ""))) continue;
       const words = Math.max(0, Math.min(100000, Math.floor(Number(sess.words) || 0)));
       const ms = Math.max(0, Math.min(12 * 3600 * 1000, Math.floor(Number(sess.ms) || 0)));
       const wpm = Math.max(0, Math.min(1000, Math.floor(Number(sess.wpm) || 0)));
-      const hour = Math.max(0, Math.min(23, Math.floor(Number(sess.hour) || 0)));
       if (words < 20) continue;
-      // Sanity check: the words can't have gone by faster than the speed setting allows.
-      if (ms < (words / Math.max(wpm, 1)) * 60000 * 0.6) continue;
+      if (ms < (words / Math.max(wpm, 1)) * 60000 * 0.6) continue; // faster than the setting allows
       const docId = /^[0-9a-f-]{36}$/.test(String(sess.docId || "")) ? sess.docId : null;
       const startWord = Number.isFinite(Number(sess.startWord)) ? Math.max(0, Math.floor(sess.startWord)) : null;
       const endWord = Number.isFinite(Number(sess.endWord)) ? Math.max(0, Math.floor(sess.endWord)) : null;
+      const tz = Math.max(-900, Math.min(900, Math.floor(Number(sess.tzOffset) || 0)));
+      let started = Number(sess.startedAt), ended = Number(sess.endedAt);
+      let status = 0;
+      const problems = [];
+      if (skew == null || !Number.isFinite(started) || !Number.isFinite(ended)) {
+        status = -3; problems.push("missing times");
+      } else {
+        started += skew; ended += skew;
+        if (ended > now + 60000 || ended < started) { status = -3; problems.push("impossible times"); }
+        if (ended - started < ms * 0.8 - 2000) { status = -3; problems.push("time doesn't add up"); }
+        if (localDate(started, tz) !== sess.day && localDate(ended, tz) !== sess.day) { status = -3; problems.push(`day ${sess.day} doesn't match`); }
+        const daysBack = (Date.parse(localDate(now, tz)) - Date.parse(sess.day)) / 86400000;
+        if (daysBack > MAX_DAYS_BACK) { status = -3; problems.push(`logged ${daysBack} days late`); }
+      }
+      if (startWord == null || endWord == null || !docId) { status = -3; problems.push("no position"); }
+      else if (words > (endWord - startWord + 1) * 1.1 + 10) { status = -3; problems.push(`${words} words for a ${endWord - startWord + 1}-word range`); }
+      incoming.push({ sess, words, ms, wpm, docId, startWord, endWord, started, ended, tz, status, problems });
+    }
+
+    // Reading on two devices at the same time only counts once.
+    const timed = incoming.filter((x) => x.status === 0);
+    if (timed.length) {
+      const lo = Math.min(...timed.map((x) => x.started)), hi = Math.max(...timed.map((x) => x.ended));
+      const { results: existing } = await env.DB.prepare(
+        "SELECT started_at, ended_at FROM reading_sessions WHERE user_id = ? AND started_at < ? AND ended_at > ? AND verified IN (0, 1)"
+      ).bind(user.id, hi, lo).all();
+      const accepted = existing.map((e) => [e.started_at, e.ended_at]);
+      for (const x of timed.sort((a, b) => a.started - b.started)) {
+        const clash = accepted.some(([a, b]) => Math.min(b, x.ended) - Math.max(a, x.started) > 5000);
+        if (clash) { x.status = -2; x.problems.push("overlaps another sitting"); }
+        else accepted.push([x.started, x.ended]);
+      }
+    }
+
+    for (const x of incoming) {
+      const hour = x.started ? localHour(x.started, x.tz) : -1;
       statements.push(env.DB.prepare(
-        "INSERT INTO reading_sessions (user_id, day, hour, words, ms, wpm, created_at, doc_id, start_word, end_word, verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
-      ).bind(user.id, sess.day, hour, words, ms, wpm, now, docId, startWord, endWord));
+        `INSERT INTO reading_sessions (user_id, day, hour, words, ms, wpm, created_at, doc_id, start_word, end_word, verified, started_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(user.id, x.sess.day, hour, x.words, x.ms, x.wpm, now, x.docId, x.startWord, x.endWord, x.status, x.started || null, x.ended || null));
+      if (x.status === -2) statements.push(flag(env, user.id, "overlap", `${x.words} words while another device was reading`));
+      else if (x.status === -3 && !x.problems.includes("missing times")) statements.push(flag(env, user.id, "rejected", `${x.words} words: ${x.problems.join("; ")}`));
     }
     if (statements.length) await env.DB.batch(statements);
     const today = DAY_RE.test(String(body.today || "")) ? body.today : entries[0]?.day;

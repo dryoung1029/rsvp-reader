@@ -5,6 +5,7 @@ import { ACHIEVEMENTS, ACHIEVEMENTS_BY_ID, SPEED_MIN_DOC_WORDS, xpFor, levelFor 
 import { HttpError, json } from "./util.js";
 import { requireUser } from "./auth.js";
 import { shiftDay, streakFrom, todayFrom } from "./stats.js";
+import { STREAK_DAY_MIN_WORDS, GOAL_MIN_FOR_ACHIEVEMENT } from "./fairplay.js";
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -62,9 +63,9 @@ export async function buildContext(env, userId, today, competition) {
   const [daysRes, sessRes, eventsRes, userRes] = await env.DB.batch([
     env.DB.prepare("SELECT day, verified_words AS words, verified_ms AS ms FROM reading_days WHERE user_id = ? AND verified_words > 0 ORDER BY day").bind(userId),
     env.DB.prepare(
-      `SELECT MAX(CASE WHEN words >= 500 AND doc_words >= ${SPEED_MIN_DOC_WORDS} THEN wpm END) AS w500,
-              MAX(CASE WHEN words >= 1000 AND doc_words >= ${SPEED_MIN_DOC_WORDS} THEN wpm END) AS w1000,
-              MAX(words) AS longest,
+      `SELECT MAX(CASE WHEN counted_words >= 500 AND doc_words >= ${SPEED_MIN_DOC_WORDS} THEN wpm END) AS w500,
+              MAX(CASE WHEN counted_words >= 1000 AND doc_words >= ${SPEED_MIN_DOC_WORDS} THEN wpm END) AS w1000,
+              MAX(counted_words) AS longest,
               MAX(CASE WHEN hour >= 22 OR hour < 4 THEN 1 ELSE 0 END) AS night,
               MAX(CASE WHEN hour >= 4 AND hour < 7 THEN 1 ELSE 0 END) AS early
        FROM reading_sessions WHERE user_id = ? AND verified = 1`
@@ -77,18 +78,20 @@ export async function buildContext(env, userId, today, competition) {
     env.DB.prepare("SELECT share_stats, daily_goal FROM users WHERE id = ?").bind(userId)
   ]);
   const days = daysRes.results;
-  const dayList = days.map((d) => d.day);
+  // A day counts for streaks only with a real amount of counted reading.
+  const dayList = days.filter((d) => d.words >= STREAK_DAY_MIN_WORDS).map((d) => d.day);
   const daySet = new Set(dayList);
   const sess = sessRes.results[0] || {};
   const ev = Object.fromEntries(eventsRes.results.map((e) => [e.kind, e]));
   const user = userRes.results[0] || {};
   const comp = competition?.get(userId) || { wins: 0, podiums: 0 };
-  const goal = user.daily_goal || 0;
+  // Small goals still work day to day, but don't count toward the goal achievements.
+  const goal = (user.daily_goal || 0) >= GOAL_MIN_FOR_ACHIEVEMENT ? user.daily_goal : 0;
 
   return {
     totalWords: days.reduce((a, d) => a + d.words, 0),
     totalMs: days.reduce((a, d) => a + d.ms, 0),
-    daysRead: days.length,
+    daysRead: dayList.length,
     maxDayWords: days.reduce((a, d) => Math.max(a, d.words), 0),
     streak: streakFrom(dayList, today),
     bestStreak: bestStreakOf(dayList),
@@ -115,7 +118,7 @@ export async function buildContext(env, userId, today, competition) {
 
 // Awards anything newly earned, then returns (and marks as shown) every
 // achievement this person hasn't been told about yet.
-export async function evaluate(env, userId, today = utcDay()) {
+export async function evaluate(env, userId, today = utcDay(), { claim = true } = {}) {
   const competition = await pastCompetitionResults(env, today.slice(0, 7));
   const ctx = await buildContext(env, userId, today, competition);
   const { results } = await env.DB.prepare("SELECT id FROM achievements WHERE user_id = ?").bind(userId).all();
@@ -126,6 +129,9 @@ export async function evaluate(env, userId, today = utcDay()) {
     await env.DB.batch(earned.map((a) =>
       env.DB.prepare("INSERT OR IGNORE INTO achievements (user_id, id, unlocked_at, seen) VALUES (?, ?, ?, 0)").bind(userId, a.id, now)));
   }
+  // claim: false awards without marking them shown, for someone who isn't here
+  // right now; they see the pop-ups next time they open RAFAS.
+  if (!claim) return [];
   const claimed = await env.DB.prepare("UPDATE achievements SET seen = 1 WHERE user_id = ? AND seen = 0 RETURNING id").bind(userId).all();
   return claimed.results.map((r) => r.id).filter((id) => ACHIEVEMENTS_BY_ID[id]);
 }
@@ -153,11 +159,11 @@ async function monthStandings(env, month) {
     ).bind(start, end),
     env.DB.prepare(
       `SELECT r.user_id, COUNT(*) AS v FROM reading_days r JOIN users u ON u.id = r.user_id
-       WHERE u.share_stats = 1 AND r.day BETWEEN ? AND ? AND r.verified_words > 0 GROUP BY r.user_id ORDER BY v DESC`
+       WHERE u.share_stats = 1 AND r.day BETWEEN ? AND ? AND r.verified_words >= ${STREAK_DAY_MIN_WORDS} GROUP BY r.user_id ORDER BY v DESC`
     ).bind(start, end),
     env.DB.prepare(
       `SELECT s.user_id, MAX(s.wpm) AS v FROM reading_sessions s JOIN users u ON u.id = s.user_id
-       WHERE u.share_stats = 1 AND s.day BETWEEN ? AND ? AND s.words >= 1000 AND s.verified = 1
+       WHERE u.share_stats = 1 AND s.day BETWEEN ? AND ? AND s.counted_words >= 1000 AND s.verified = 1
          AND s.doc_words >= ${SPEED_MIN_DOC_WORDS} GROUP BY s.user_id ORDER BY v DESC`
     ).bind(start, end),
     env.DB.prepare(
