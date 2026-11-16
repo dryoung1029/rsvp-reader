@@ -490,3 +490,12 @@ table.leader td { vertical-align: middle; }
 @media (max-width: 480px) { .tabs a { padding: 10px 8px; font-size: 14.5px; } }
 .tab-short { display: none; }
 @media (max-width: 480px) { .tab-full { display: none; } .tab-short { display: inline; } }
+
+/* ---------- Explainer video ---------- */
+.explainer { margin: 0; display: grid; gap: 8px; justify-items: center; }
+.explainer video {
+  display: block; width: 100%; max-width: 340px; aspect-ratio: 9 / 16; max-height: 70vh;
+  border-radius: 22px; background: #000; border: 1px solid var(--border); object-fit: contain;
+}
+@media (max-width: 899px) { .landing .explainer video { max-width: 300px; } }
+@media (min-width: 900px) { .landing .explainer video { max-height: min(62vh, 600px); } }

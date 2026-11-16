@@ -57,6 +57,37 @@ async function contactCard(request, env, url) {
   });
 }
 
+// Static hosting answers every request with the whole file, but Safari only
+// plays video from servers that can send part of it (HTTP range requests).
+// So the explainer video goes through here and gets proper 206 responses.
+async function serveVideo(request, env, url) {
+  const asset = await env.ASSETS.fetch(new Request(new URL(url.pathname, url), { method: "GET" }));
+  if (!asset.ok) return asset;
+  const bytes = new Uint8Array(await asset.arrayBuffer());
+  const size = bytes.byteLength;
+  const base = {
+    "content-type": "video/mp4",
+    "accept-ranges": "bytes",
+    "cache-control": "public, max-age=86400",
+    etag: asset.headers.get("etag") || `"${size}"`
+  };
+  const m = (request.headers.get("range") || "").match(/^bytes=(\d*)-(\d*)$/);
+  if (!m || (m[1] === "" && m[2] === "")) {
+    return new Response(request.method === "HEAD" ? null : bytes, { headers: { ...base, "content-length": String(size) } });
+  }
+  let start, end;
+  if (m[1] === "") { start = Math.max(0, size - Number(m[2])); end = size - 1; }  // last N bytes
+  else { start = Number(m[1]); end = m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1); }
+  if (start >= size || start > end) {
+    return new Response(null, { status: 416, headers: { ...base, "content-range": `bytes */${size}` } });
+  }
+  const body = request.method === "HEAD" ? null : bytes.subarray(start, end + 1);
+  return new Response(body, {
+    status: 206,
+    headers: { ...base, "content-range": `bytes ${start}-${end}/${size}`, "content-length": String(end - start + 1) }
+  });
+}
+
 async function handleApi(request, env, url) {
   const { pathname } = url;
   if (pathname === "/api/config" && request.method === "GET") return json(config(env));
@@ -85,6 +116,9 @@ export default {
     }
     // The installed app's service worker normally catches share-sheet posts.
     // If it hasn't installed yet, land on the app instead of an error page.
+    if (url.pathname === "/rafas-explainer.mp4" && (request.method === "GET" || request.method === "HEAD")) {
+      return serveVideo(request, env, url);
+    }
     if (url.pathname === "/share" && request.method === "POST") {
       return Response.redirect(new URL("/?shared=1", url).toString(), 303);
     }
