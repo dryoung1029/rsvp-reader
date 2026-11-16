@@ -4,6 +4,10 @@
 //
 // Points: 5 (easy) to 100 (legendary). Secret achievements show "???" until earned.
 
+// Speed only counts in documents at least this long, so a short or made-up
+// passage can't be used to rack up speed records.
+export const SPEED_MIN_DOC_WORDS = 2000;
+
 export const TIERS = [
   { min: 100, name: "legendary" },
   { min: 40, name: "gold" },
@@ -35,13 +39,14 @@ export const ACHIEVEMENTS = [
   { id: "marathon", group: "Volume", icon: "🏃", title: "Marathon", desc: "Read 20,000 words in one day.", points: 40, progress: (c) => [c.maxDayWords, 20000], check: (c) => c.maxDayWords >= 20000 },
   { id: "in_the_zone", group: "Volume", icon: "🧘", title: "In the Zone", desc: "Read 3,000 words without pausing.", points: 15, progress: (c) => [c.longestSession, 3000], check: (c) => c.longestSession >= 3000 },
 
-  // Speed: the speed setting you held for a whole sitting of at least 500 (or 1,000) words
-  { id: "speed_300", group: "Speed", icon: "🚲", title: "Cruising", desc: "Read 500 words in one sitting at 300 wpm or faster.", points: 5, ...speed(300, 500) },
-  { id: "speed_400", group: "Speed", icon: "🛵", title: "Picking Up Pace", desc: "Read 500 words in one sitting at 400 wpm or faster.", points: 10, ...speed(400, 500) },
-  { id: "speed_500", group: "Speed", icon: "🚗", title: "Fast Lane", desc: "Read 500 words in one sitting at 500 wpm or faster.", points: 20, ...speed(500, 500) },
-  { id: "speed_swizz", group: "Speed", icon: "⚡", title: "Read As Fast As Swizz", desc: "Read 1,000 words in one sitting at 600 wpm or faster.", points: 40, ...speed(600, 1000) },
-  { id: "speed_750", group: "Speed", icon: "🚄", title: "Blur", desc: "Read 1,000 words in one sitting at 750 wpm or faster.", points: 60, ...speed(750, 1000) },
-  { id: "speed_900", group: "Speed", icon: "🚀", title: "Light Speed", desc: "Read 1,000 words in one sitting at 900 wpm or faster.", points: 100, ...speed(900, 1000) },
+  // Speed: the speed setting you held for a whole sitting of at least 500 (or 1,000) words,
+  // in a document of at least SPEED_MIN_DOC_WORDS words, and passed the quiz on it
+  { id: "speed_300", group: "Speed", icon: "🚲", title: "Cruising", desc: "Read 500 words in one sitting at 300 wpm or faster, in a full-length document.", points: 5, ...speed(300, 500) },
+  { id: "speed_400", group: "Speed", icon: "🛵", title: "Picking Up Pace", desc: "Read 500 words in one sitting at 400 wpm or faster, in a full-length document.", points: 10, ...speed(400, 500) },
+  { id: "speed_500", group: "Speed", icon: "🚗", title: "Fast Lane", desc: "Read 500 words in one sitting at 500 wpm or faster, in a full-length document.", points: 20, ...speed(500, 500) },
+  { id: "speed_swizz", group: "Speed", icon: "⚡", title: "Read As Fast As Swizz", desc: "Read 1,000 words in one sitting at 600 wpm or faster, in a full-length document.", points: 40, ...speed(600, 1000) },
+  { id: "speed_750", group: "Speed", icon: "🚄", title: "Blur", desc: "Read 1,000 words in one sitting at 750 wpm or faster, in a full-length document.", points: 60, ...speed(750, 1000) },
+  { id: "speed_900", group: "Speed", icon: "🚀", title: "Light Speed", desc: "Read 1,000 words in one sitting at 900 wpm or faster, in a full-length document.", points: 100, ...speed(900, 1000) },
 
   // Streaks
   { id: "streak_3", group: "Streaks", icon: "🔥", title: "Three in a Row", desc: "Read 3 days in a row.", points: 10, ...streak(3) },
@@ -66,6 +71,11 @@ export const ACHIEVEMENTS = [
   { id: "pass_it_on", group: "Family", icon: "📨", title: "Pass It On", desc: "Send a document to someone.", points: 10, progress: (c) => [c.sent, 1], check: (c) => c.sent >= 1 },
   { id: "book_club", group: "Family", icon: "☕", title: "Book Club", desc: "Send 10 documents to family.", points: 25, progress: (c) => [c.sent, 10], check: (c) => c.sent >= 10 },
   { id: "recommended", group: "Family", icon: "🤝", title: "Good Recommendation", desc: "Finish a document someone sent you.", points: 15, progress: (c) => [c.finishedShared, 1], check: (c) => c.finishedShared >= 1 },
+
+  // Quizzes: the quick check that makes reading count
+  { id: "sharp", group: "Quizzes", icon: "🧠", title: "Sharp", desc: "Pass your first reading quiz.", points: 10, progress: (c) => [c.quizzes, 1], check: (c) => c.quizzes >= 1 },
+  { id: "perfect_ten", group: "Quizzes", icon: "🎓", title: "Perfect Ten", desc: "Pass 10 quizzes on the first try.", points: 25, progress: (c) => [c.quizzesFirstTry, 10], check: (c) => c.quizzesFirstTry >= 10 },
+  { id: "scholar", group: "Quizzes", icon: "📜", title: "Scholar", desc: "Pass 50 reading quizzes.", points: 50, progress: (c) => [c.quizzes, 50], check: (c) => c.quizzes >= 50 },
 
   // Competition
   { id: "podium", group: "Competition", icon: "🥉", title: "On the Podium", desc: "Finish in the top 3 for words read in a monthly competition.", points: 25, progress: (c) => [c.podiums, 1], check: (c) => c.podiums >= 1 },

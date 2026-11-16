@@ -8,8 +8,9 @@ const SECTIONS = [
   ["cloud", "Google Drive, Dropbox, iCloud"],
   ["reading", "Reading controls"],
   ["pacing", "Pacing and chapters"],
-  ["progress", "Progress and family board"],
+  ["progress", "Progress and family"],
   ["achievements", "Achievements, levels and competitions"],
+  ["rules", "Achievement rules"],
   ["sending", "Sending to family"],
   ["bookmarklet", "Saving pages on a computer"],
   ["keys", "Keyboard shortcuts"],
@@ -153,15 +154,17 @@ export default function Help({ inboxEmail, signedIn }) {
       </section>
 
       <section id="progress">
-        <h2>Progress and family board</h2>
+        <h2>Progress and family</h2>
         <p>
           <Link to="/progress">Progress</Link> shows how much you've read today and this week, your reading streak
           (days in a row with some reading), your average speed over the last 30 days, and a chart of the last two
           weeks. Words count while they're flashing, not when you skip ahead.
         </p>
         <p>
-          The <b>family board</b> is optional. If you join it, the others on it can see your words this week, your
-          streak and your average speed, and you can see theirs. Nobody sees what anyone is reading. Leave it any time.
+          The <b>Family</b> tab shows everyone's progress: level, streak, how much they've read, speed and
+          achievements. Tap someone to see their full profile. Nobody sees what anyone is reading. Progress is shared
+          with your family unless you choose <b>Hide my progress</b> on the Progress page; while it's hidden, you
+          can't see the others' progress or compete either.
         </p>
       </section>
 
@@ -175,8 +178,16 @@ export default function Help({ inboxEmail, signedIn }) {
           See them all, with your progress toward each, under <Link to="/progress/achievements">Progress → Achievements</Link>.
         </p>
         <p>
-          Speed achievements count a whole sitting (from Play to Pause) at the slowest speed you used during it, so
-          you have to hold the pace. Sittings that went by faster than the speed setting allows don't count.
+          Speed achievements count a whole sitting, from Play to Pause, at the slowest speed you used during it, so you
+          have to hold the pace.
+        </p>
+        <h3>Quick checks (quizzes)</h3>
+        <p>
+          To stop anyone winning by turning the speed all the way up, reading only counts toward achievements, levels,
+          competitions and leaderboards after you pass a quick check on it. After a few minutes of reading, a
+          <b> Make it count</b> button appears under the reader: answer 3 multiple-choice questions about what you just read.
+          Get all 3 right and those words count. Miss one and you get one more try with new questions. Reading always
+          counts in your own stats either way.
         </p>
         <h3>Levels</h3>
         <p>
@@ -187,7 +198,7 @@ export default function Help({ inboxEmail, signedIn }) {
         <p>Set a number of words to read each day on the Progress page. You'll get a pop-up when you reach it.</p>
         <h3>Monthly competitions</h3>
         <p>
-          Everyone on the family board is automatically entered. Each calendar month there are four categories: most
+          Everyone sharing their progress is automatically entered. Each calendar month there are four categories: most
           words, top speed (fastest sitting of 1,000+ words), most documents finished and most days read. Whoever
           reads the most words is the month's champion, and the top 3 earn a podium achievement once the month ends.
           Past champions are listed on the <Link to="/progress/compete">Compete</Link> tab.
@@ -196,12 +207,30 @@ export default function Help({ inboxEmail, signedIn }) {
         <p>All-time rankings for level, words, achievements, best streak, top speed and titles won, plus a feed of who unlocked what.</p>
       </section>
 
+      <section id="rules">
+        <h2>Achievement rules</h2>
+        <p>Everyone plays by the same rules, so the leaderboard means something:</p>
+        <ul>
+          <li>Reading counts toward achievements, levels, competitions and leaderboards after you pass the quick check on it. Everything you read always counts in your own stats.</li>
+          <li>Each part of a document counts once. Rereading is fine, it just doesn't add again, and that includes adding the same text a second time.</li>
+          <li>Speed records need a full sitting at that speed, in a full-length document.</li>
+          <li>A document counts as finished when you've actually read most of it.</li>
+          <li>Reading counts on the day you do it, and on one device at a time.</li>
+          <li>Text has to be real reading. Very repetitive text doesn't count.</li>
+          <li>Quick checks are timed, and the document's text is hidden while you answer.</li>
+          <li>A streak day needs a real reading session, not just a few words.</li>
+          <li>Sending a document counts once the other person reads it.</li>
+          <li>There's a generous daily limit on how much can count.</li>
+        </ul>
+        <p className="muted small">The site admin can see notes about anything unusual. If something you read didn't count and you think it should have, ask them.</p>
+      </section>
+
       <section id="sending">
         <h2>Sending to family</h2>
         <p>
           Press <b>Send to…</b> under the reader and pick someone. They get their own copy at the top of their library,
           starting from the beginning, plus an email letting them know. You can add a short note. Your copy and your
-          place in it don't change.
+          place in it don't change. It counts toward your sending achievements once they've read it.
         </p>
       </section>
 
@@ -262,11 +291,29 @@ export default function Help({ inboxEmail, signedIn }) {
           page, selected text, or a PDF/EPUB file and it opens in RAFAS, saved to your library. Nothing else to set up.
         </p>
 
-        <h3>iPhone and iPad</h3>
+        <h3>iPhone and iPad: the easy way (email)</h3>
         <p>
-          iOS doesn't let web apps appear in the Share menu, so RAFAS uses a Shortcut that sends items to your personal
-          inbox. RAFAS adds them to your library the next time you open it. First, go to <Link to="/account">Account</Link> and
-          press <b>Create Shortcut token</b>. Copy the token; you'll paste it in step 4.
+          On your <Link to="/account">Account</Link> page, tap <b>Add RAFAS to Contacts</b> and save the contact. After
+          that, on any web page, PDF or file: tap Share → Mail → To: <b>RAFAS</b> → Send. Send it from the email address you
+          sign in with. It's added to your library the next time you open RAFAS. Nothing else to set up.
+        </p>
+
+        <h3>iPhone and iPad: a RAFAS button in the Share menu</h3>
+        <p>
+          iOS doesn't let web apps appear in the Share menu, so this uses a Shortcut. If the Account page shows
+          <b> Set up the Share button</b>, it's quick:
+        </p>
+        <ol>
+          <li>Tap <b>Set up the Share button</b>. Your personal token is copied.</li>
+          <li>Tap <b>Get the Shortcut</b>, then <b>Add Shortcut</b>.</li>
+          <li>When it asks for your token, paste it.</li>
+        </ol>
+        <p>From then on, RAFAS (or "Send to RAFAS") appears when you tap Share.</p>
+
+        <h3>Building the Shortcut yourself</h3>
+        <p>
+          If there's no Set up button, build it once by hand. On your <Link to="/account">Account</Link> page, press
+          <b> Create Shortcut token</b> and copy the token; you'll paste it in step 4.
         </p>
         <p>Make two shortcuts, one for links and text and one for files:</p>
         <ol>

@@ -111,7 +111,7 @@ export default function App() {
   else if (user === undefined) page = <div className="page"><p className="muted">Loading...</p></div>;
   else if (user) {
     if (path === "/account") page = <Account user={user} setUser={setUser} config={config} onSignOut={onSignOut} />;
-    else if (path === "/progress" || path.startsWith("/progress/")) page = <Progress user={user} setUser={setUser} tab={path.split("/")[2] || "overview"} />;
+    else if (path === "/progress" || path.startsWith("/progress/")) page = <Progress key={path} user={user} setUser={setUser} tab={path.split("/")[2] || "overview"} memberId={path.split("/")[3] || ""} />;
     else if (path === "/add") page = null;
     else if (joinMatch || path === "/signin" || path === "/verify") {
       page = (

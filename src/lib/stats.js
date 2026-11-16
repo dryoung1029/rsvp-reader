@@ -73,16 +73,28 @@ function createTracker(userId) {
       add(n, 0);
       if (session) session.words += n;
     },
-    start(wpm) {
+    // docId and the word position let the server quiz you on exactly what you read.
+    start(wpm, docId, startWord) {
       if (playingSince == null) playingSince = Date.now();
       if (!session) {
         const now = new Date();
-        session = { day: localDay(now), hour: now.getHours(), words: 0, ms: 0, wpm };
+        session = {
+          day: localDay(now), hour: now.getHours(), words: 0, ms: 0, wpm,
+          docId: docId || null, startWord: startWord ?? null, endWord: startWord ?? null,
+          startedAt: now.getTime(), endedAt: now.getTime(), tzOffset: now.getTimezoneOffset()
+        };
       }
     },
     // A sitting counts at the slowest speed used during it.
     noteWpm(wpm) { if (session) session.wpm = Math.min(session.wpm, wpm); },
-    stop() { checkpoint(); playingSince = null; endSession(); save(); },
+    stop(endWord) {
+      checkpoint();
+      playingSince = null;
+      if (session && endWord != null) session.endWord = endWord;
+      if (session) session.endedAt = Date.now();
+      endSession();
+      save();
+    },
     async flush({ keepalive = false } = {}) {
       if (flushing) return flushing;
       checkpoint();
@@ -94,9 +106,10 @@ function createTracker(userId) {
       pending = { days: {}, sessions: [] };
       save();
       const today = localDay();
-      flushing = api("/api/stats", { method: "POST", body: { today, days, sessions: snapshot.sessions }, keepalive })
+      flushing = api("/api/stats", { method: "POST", body: { today, sentAt: Date.now(), days, sessions: snapshot.sessions }, keepalive })
         .then((result) => {
           announceAchievements(result.unlocked);
+          if (result.quiz) window.dispatchEvent(new CustomEvent("rafas:quiz-pending", { detail: result.quiz }));
           if (result.dailyGoal && result.todayWords >= result.dailyGoal && localStorage.getItem(goalKey) !== today) {
             try { localStorage.setItem(goalKey, today); } catch { /* ignore */ }
             toast({ icon: "🎯", title: "Daily goal reached", body: `${result.todayWords.toLocaleString()} words today. Nice work.` });

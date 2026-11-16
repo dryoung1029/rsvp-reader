@@ -29,9 +29,17 @@ export default function Privacy() {
       <h2>Reading stats</h2>
       <p>
         RAFAS records how many words you read each day and for how long, and each sitting's length, speed setting and
-        hour of the day, to show your progress, streaks and achievements. If you join the family board, other people
-        on the board see your totals, streaks, speeds, level, achievements and competition results. They never see
-        what you're reading.
+        hour of the day, to show your progress, streaks and achievements. Your family (the other members of this
+        RAFAS site) can see your progress: totals, streaks, speeds, level, achievements and competition results.
+        They never see what you're reading. You can hide your progress on the Progress page at any time.
+      </p>
+
+      <h2>Quick-check quizzes</h2>
+      <p>
+        To write quiz questions, RAFAS sends the stretch of text you just read (up to a few thousand words) to
+        Anthropic's Claude API, which returns the questions. If Claude isn't set up for this site, the questions are
+        made on the RAFAS server from the text itself and nothing is sent. Your answers and results are stored with
+        your account.
       </p>
 
       <h2>Other members</h2>

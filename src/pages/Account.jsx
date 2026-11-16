@@ -7,6 +7,33 @@ function copy(text, setNote) {
   navigator.clipboard?.writeText(text).then(() => setNote("Copied."), () => setNote("Couldn't copy. Select the text and copy it."));
 }
 
+// Notes about unusual activity, for a person to look at. They don't change anyone's score.
+function FairPlay() {
+  const [notes, setNotes] = useState(null);
+  useEffect(() => { api("/api/admin/fairplay").then((r) => setNotes(r.notes)).catch(() => setNotes([])); }, []);
+  return (
+    <section className="panel">
+      <h2>Fair play</h2>
+      <p className="muted small">
+        Things the app noticed in the last 30 days that a person might want to look at. The rules are already applied
+        automatically; nothing here changes anyone's score. Only admins see this.
+      </p>
+      {notes == null ? <div className="muted small">Loading...</div> : notes.length ? (
+        <div className="table-wrap">
+          <table className="list">
+            <thead><tr><th>Who</th><th>What</th><th>When</th></tr></thead>
+            <tbody>
+              {notes.slice(0, 60).map((n, i) => (
+                <tr key={i}><td><b>{n.name}</b></td><td><span className="pill">{n.kind}</span><div className="muted small">{n.detail}</div></td><td className="small">{formatAgo(n.at)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <div className="muted small">Nothing unusual.</div>}
+    </section>
+  );
+}
+
 function InviteAdmin() {
   const [invites, setInvites] = useState([]);
   const [users, setUsers] = useState([]);
@@ -150,9 +177,103 @@ function Bookmarklet() {
   );
 }
 
+// Copies text in a way Safari accepts after an await: the clipboard write is
+// started inside the tap, with the text arriving later as a promise.
+async function copyLater(textPromise) {
+  try {
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": textPromise.then((t) => new Blob([t], { type: "text/plain" })) })]);
+      return true;
+    }
+    await navigator.clipboard.writeText(await textPromise);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function IphoneSetup({ user, setUser, config }) {
+  const [token, setToken] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const shortcutUrl = config?.shortcutUrl;
+
+  async function makeToken() {
+    setBusy(true);
+    setNote("");
+    const tokenPromise = api("/api/me/inbox-token", { method: "POST" }).then((r) => r.token);
+    const didCopy = await copyLater(tokenPromise);
+    try {
+      const value = await tokenPromise;
+      setToken(value);
+      setCopied(didCopy);
+      setUser({ ...user, hasInboxToken: true });
+    } catch (e) {
+      setNote(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel">
+      <h2>iPhone and iPad</h2>
+
+      {config?.inboxEmail && (
+        <div className="setup-step">
+          <div className="setup-num" aria-hidden="true">A</div>
+          <div>
+            <p><b>Easiest: share by email.</b> Add RAFAS to your contacts, then on any web page, PDF or file tap Share → Mail → To: RAFAS → Send.</p>
+            <div className="row"><a className="btn" href="/api/contact.vcf">Add RAFAS to Contacts</a></div>
+          </div>
+        </div>
+      )}
+
+      <div className="setup-step">
+        <div className="setup-num" aria-hidden="true">B</div>
+        <div>
+          <p>
+            <b>Or add a RAFAS button to your Share menu</b> with a Shortcut.
+            {user.hasInboxToken && !token && " Setting it up again replaces your old token, so an older copy of the Shortcut stops working."}
+          </p>
+          {!token ? (
+            <div className="row">
+              <button className="btn primary" disabled={busy} onClick={makeToken}>
+                {shortcutUrl ? "Set up the Share button" : user.hasInboxToken ? "Make a new Shortcut token" : "Create Shortcut token"}
+              </button>
+            </div>
+          ) : (
+            <div className="callout">
+              {shortcutUrl ? (
+                <>
+                  <div><b>{copied ? "Your token is copied." : "Copy your token first:"}</b> Now tap <b>Get the Shortcut</b>, then <b>Add Shortcut</b>, and paste the token when it asks.</div>
+                  {!copied && <div className="code-line">{token}</div>}
+                  <div className="row">
+                    <a className="btn primary" href={shortcutUrl} target="_blank" rel="noreferrer">Get the Shortcut</a>
+                    <button className="btn sm" onClick={() => copy(token, setNote)}>{copied ? "Copy token again" : "Copy token"}</button>
+                  </div>
+                  <div className="muted small">If iPhone says it can't open shared shortcuts, turn on Settings → Apps → Shortcuts → Private Sharing (Allow Untrusted Shortcuts on older iOS), then tap the link again.</div>
+                </>
+              ) : (
+                <>
+                  <div className="small muted">Your token. Copy it now: it won't be shown again.</div>
+                  <div className="code-line">{token}</div>
+                  <div className="row"><button className="btn sm primary" onClick={() => copy(token, setNote)}>Copy token</button></div>
+                  <div className="muted small">Then follow the <Link to="/help#phone">step-by-step guide</Link> to build the Shortcut.</div>
+                </>
+              )}
+            </div>
+          )}
+          {note && <div className="muted small">{note}</div>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Account({ user, setUser, config, onSignOut }) {
   const [name, setName] = useState(user.name);
-  const [token, setToken] = useState("");
   const [note, setNote] = useState("");
   const inboxEmail = config?.inboxEmail;
 
@@ -165,12 +286,6 @@ export default function Account({ user, setUser, config, onSignOut }) {
     } catch (e) { setNote(e.message); }
   }
 
-  async function makeToken() {
-    if (user.hasInboxToken && !window.confirm("Create a new token? Shortcuts using the old one will stop working until you update them.")) return;
-    const result = await api("/api/me/inbox-token", { method: "POST" });
-    setToken(result.token);
-    setUser({ ...user, hasInboxToken: true });
-  }
 
   async function signOutEverywhere() {
     if (!window.confirm("Sign out on every device, including this one?")) return;
@@ -212,27 +327,16 @@ export default function Account({ user, setUser, config, onSignOut }) {
           </p>
         )}
         <p><b>Android:</b> install RAFAS and it appears in your Share menu. <Link to="/help#phone">How</Link></p>
-        <p>
-          <b>iPhone Shortcut:</b> the Shortcut needs a personal token.{" "}
-          {user.hasInboxToken ? "You've created one before. Make a new one if you've lost it." : "Create one to set it up."}{" "}
-          <Link to="/help#phone">Step-by-step guide</Link>
-        </p>
-        {token ? (
-          <div className="callout">
-            <div className="small muted">Your token. Copy it now: it won't be shown again.</div>
-            <div className="code-line">{token}</div>
-            <div className="row"><button className="btn sm primary" onClick={() => copy(token, setNote)}>Copy token</button></div>
-          </div>
-        ) : (
-          <div><button className="btn" onClick={makeToken}>{user.hasInboxToken ? "Make a new Shortcut token" : "Create Shortcut token"}</button></div>
-        )}
       </section>
+
+      <IphoneSetup user={user} setUser={setUser} config={config} />
 
       <p className="muted small">Questions? See <Link to="/help">Help</Link>.</p>
 
       <Bookmarklet />
 
       {user.isAdmin && <InviteAdmin />}
+      {user.isAdmin && <FairPlay />}
 
       <section className="panel">
         <h2>Delete account</h2>

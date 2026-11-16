@@ -215,7 +215,8 @@ async function completeSignIn(request, env, row, nameFromForm) {
     const id = crypto.randomUUID();
     const name = cleanName(nameFromForm) || row.name || row.email.split("@")[0];
     await env.DB.prepare(
-      "INSERT INTO users (id, email, name, is_admin, invite_code, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      // share_stats = 1: progress is visible to the family by default (opt out on the Progress page).
+      "INSERT INTO users (id, email, name, is_admin, invite_code, created_at, last_seen_at, share_stats) VALUES (?, ?, ?, ?, ?, ?, ?, 1)"
     ).bind(id, row.email, name, isAdmin ? 1 : 0, row.invite_code, now, now).run();
     user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
   } else if (!user.is_admin && adminEmails(env).includes(user.email)) {
@@ -361,6 +362,28 @@ export async function handleAuth(request, env, pathname) {
     return json({ users: results.map((u) => ({ id: u.id, email: u.email, name: u.name, isAdmin: Boolean(u.is_admin), createdAt: u.created_at, lastSeenAt: u.last_seen_at, docCount: u.doc_count })) });
   }
 
+  // Fair play notes for the admin to look at. Nothing here changes anyone's score.
+  if (pathname === "/api/admin/fairplay" && method === "GET") {
+    await requireAdmin(request, env);
+    const since = Date.now() - 30 * DAY;
+    const [flags, quizzes] = await env.DB.batch([
+      env.DB.prepare(
+        `SELECT f.kind, f.detail, f.created_at, u.name, u.id AS user_id FROM fair_play_flags f JOIN users u ON u.id = f.user_id
+         WHERE f.created_at > ? ORDER BY f.created_at DESC LIMIT 200`
+      ).bind(since),
+      env.DB.prepare(
+        `SELECT u.name, u.id AS user_id, SUM(CASE WHEN q.status = 'failed' THEN 1 ELSE 0 END) AS failed, COUNT(*) AS total
+         FROM quizzes q JOIN users u ON u.id = q.user_id WHERE q.created_at > ? GROUP BY u.id`
+      ).bind(Date.now() - 7 * DAY)
+    ]);
+    const notes = flags.results.map((f) => ({ name: f.name, userId: f.user_id, kind: f.kind, detail: f.detail, at: f.created_at }));
+    for (const q of quizzes.results) {
+      if (q.failed >= 4 && q.failed / q.total > 0.5) notes.push({ name: q.name, userId: q.user_id, kind: "many failed quizzes", detail: `${q.failed} of ${q.total} quizzes failed this week`, at: Date.now() });
+    }
+    notes.sort((a, b) => b.at - a.at);
+    return json({ notes });
+  }
+
   const userMatch = pathname.match(/^\/api\/admin\/users\/([0-9a-f-]{36})$/);
   if (userMatch && method === "DELETE") {
     const admin = await requireAdmin(request, env);
@@ -389,6 +412,10 @@ export async function deleteUserData(env, userId) {
     env.DB.prepare("DELETE FROM reading_sessions WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM user_events WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM achievements WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM quizzes WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM doc_coverage WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM sends WHERE sender_id = ? OR recipient_id = ?").bind(userId, userId),
+    env.DB.prepare("DELETE FROM fair_play_flags WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId)
   ]);
   if (env.INBOX) {
