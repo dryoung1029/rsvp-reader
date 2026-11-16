@@ -16,6 +16,8 @@ Live at **https://rafas.app** (Cloudflare Workers).
 - Reading stats (words, time, streaks, average speed, 14-day chart) and an opt-in family board.
 - Comprehension quick checks: after a few minutes of reading, a 3-question quiz on that passage (written by Claude, or fill-in-the-blank without a key). Only passed reading counts toward achievements, levels, competitions and leaderboards.
 - Gamification: 39 achievements with points and tiers, XP levels, a daily goal, monthly competitions (words, speed, finished, days read), all-time leaderboards and a family activity feed.
+- Find a place: search a document by word or phrase, step through matches, jump by chapter (guessed from "Chapter 3"-style headings when a document has none) or by percentage.
+- Session goals: read to the end of a chapter, a number of words, or a number of minutes, then pause automatically.
 - Context view when paused; chapters for EPUB, PDF bookmarks, Word headings, and Markdown/HTML headings.
 - Smart pacing (time spent on long words, not short common ones) and a 30-second warm-up.
 - Send a document to another member, with an email notice.

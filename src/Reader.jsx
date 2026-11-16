@@ -16,6 +16,9 @@ import { getStatsTracker, checkAchievements } from "./lib/stats.js";
 import Sheet from "./components/Sheet.jsx";
 import QuizSheet from "./components/QuizSheet.jsx";
 import ContextView from "./components/ContextView.jsx";
+import NavigateSheet from "./components/NavigateSheet.jsx";
+import GoalSheet from "./components/GoalSheet.jsx";
+import { detectOutline } from "./lib/navigate.js";
 
 const SAMPLE_TEXT = `Welcome to RAFAS. Words appear one at a time in the same spot, so your eyes can stay still. The red letter is the pivot: rest your eyes on it. Tap the middle to pause, or tap the left or right edge to jump back or forward a sentence. Add an article, a PDF, an EPUB, a Word document or some pasted text, and RAFAS will save it to your library and remember your place on every device you sign in on.`;
 
@@ -161,7 +164,13 @@ export default function Reader({ user, config, visible, path }) {
   const [warmup, setWarmup] = useState(() => store.get("rsvp:warmup") !== "false");
   const [showContext, setShowContext] = useState(() => store.get("rsvp:context") !== "false");
   const [chapters, setChapters] = useState([]);
-  const [sheet, setSheet] = useState(null); // "chapters" | "send" | "quiz" | null
+  const [sheet, setSheet] = useState(null); // "find" | "contents" | "goal" | "send" | "quiz" | null
+  // Last search, so you can step through matches without reopening it: { query, hits, i }
+  const [found, setFound] = useState(null);
+  // This session's reading goal: { type: "chapter"|"words"|"time", targetWord, amount, label, startWord, done }
+  const [goal, setGoalState] = useState(null);
+  const goalRef = useRef(null);
+  const goalMsRef = useRef(0); // reading time counted toward the goal
   // Reading waiting for a quiz, per document: { [docId]: { words, ready } }
   const [quizPending, setQuizPending] = useState({});
   const [quizSnoozed, setQuizSnoozed] = useState({}); // docId -> words when "Later" was tapped
@@ -266,6 +275,8 @@ export default function Reader({ user, config, visible, path }) {
     setTitle(meta.title);
     setDocId(meta.id);
     setChapters(Array.isArray(meta.chapters) ? meta.chapters : []);
+    setFound(null);
+    setGoal(null);
     setTouched(Boolean(meta.wordIndex));
     setIndex(Math.floor((meta.wordIndex || 0) / chunkSize));
     positionRef.current = { docId: meta.id, wordIndex: meta.wordIndex || 0, readWords: meta.readWords || 0 };
@@ -496,10 +507,32 @@ export default function Reader({ user, config, visible, path }) {
     const shown = countWords(current);
     const timer = setTimeout(() => {
       stats.addWords(shown);
+      if (goalReached(delay)) return;
       setIndex((old) => clamp(old + 1, 0, maxIndex));
     }, delay);
     return () => clearTimeout(timer);
   }, [playing, index, maxIndex, current, wpm, chunks.length, smartPacing, warmup, stats]);
+
+  // Called after each flash while a goal is set. Chapter goals stop on the
+  // chapter's last word; word and time goals finish the sentence first.
+  function goalReached(delay) {
+    const g = goalRef.current;
+    if (!g || g.done) return false;
+    goalMsRef.current += delay;
+    const shownThrough = (index + 1) * chunkSize; // words up to and including this flash
+    let reached;
+    let over = false;
+    if (g.type === "chapter") reached = shownThrough >= g.targetWord;
+    else if (g.type === "words") { reached = shownThrough - g.startWord >= g.amount; over = shownThrough - g.startWord >= g.amount + 80; }
+    else { reached = goalMsRef.current >= g.amount * 60000; over = goalMsRef.current >= g.amount * 60000 + 30000; }
+    if (!reached) return false;
+    if (g.type !== "chapter" && !over && !/[.!?…]["'\u201d\u2019)\]]*$/.test(current)) return false;
+    const read = Math.max(0, Math.min(words.length, shownThrough) - g.startWord);
+    setGoal({ ...g, done: true, read, ms: goalMsRef.current });
+    setPlaying(false);
+    if (index < maxIndex) setIndex((old) => clamp(old + 1, 0, maxIndex)); // ready to carry on from the next word
+    return true;
+  }
 
   // Reading time for stats, and the warm-up ramp: a pause of more than
   // 10 seconds restarts the warm-up; a quick pause doesn't.
@@ -539,6 +572,7 @@ export default function Reader({ user, config, visible, path }) {
 
   const togglePlay = useCallback(() => {
     if (!playing && index >= maxIndex && maxIndex > 0) setIndex(0); // pressing play at the end starts over
+    if (!playing && goalRef.current?.done) setGoal(null);
     setPlaying(!playing);
   }, [playing, index, maxIndex]);
   const backSentence = useCallback(() => setIndex((i) => prevSentenceStart(chunks, i)), [chunks]);
@@ -572,6 +606,13 @@ export default function Reader({ user, config, visible, path }) {
     function onKeyDown(event) {
       const tag = event.target?.tagName;
       if (sheet) return;
+      const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (!typing && words.length > 1 && ((event.key === "f" && (event.metaKey || event.ctrlKey)) || (event.key === "/" && !event.metaKey && !event.ctrlKey))) {
+        event.preventDefault();
+        setPlaying(false);
+        setSheet("find");
+        return;
+      }
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || event.metaKey || event.ctrlKey || event.altKey) return;
       const key = event.key;
       if (event.code === "Space") { event.preventDefault(); togglePlay(); }
@@ -585,7 +626,7 @@ export default function Reader({ user, config, visible, path }) {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [visible, sheet, maxIndex, focus, togglePlay, backSentence, nextSentence, enterFocus, exitFocus]);
+  }, [visible, sheet, maxIndex, focus, togglePlay, backSentence, nextSentence, enterFocus, exitFocus, words.length]);
 
   function changeChunkSize(next) {
     const wordIndex = index * chunkSize;
@@ -713,17 +754,50 @@ export default function Reader({ user, config, visible, path }) {
 
   // ---------- Chapters ----------
   const wordIndex = index * chunkSize;
+  // Documents without chapters get an outline guessed from headings in the text.
+  const outlineGuessed = !chapters.length;
+  const outline = useMemo(() => (chapters.length ? chapters : detectOutline(words)), [chapters, words]);
   const chapterInfo = useMemo(() => {
-    if (!chapters.length) return null;
+    if (!outline.length) return null;
     let i = -1;
-    for (let k = 0; k < chapters.length; k += 1) if (chapters[k].w <= wordIndex) i = k;
-    if (i < 0) return { title: "Before chapter 1", index: -1, end: chapters[0].w, start: 0 };
-    return { title: chapters[i].t, index: i, start: chapters[i].w, end: chapters[i + 1]?.w ?? words.length };
-  }, [chapters, wordIndex, words.length]);
+    for (let k = 0; k < outline.length; k += 1) if (outline[k].w <= wordIndex) i = k;
+    if (i < 0) return { title: "Beginning", index: -1, end: outline[0].w, start: 0 };
+    return { title: outline[i].t || `Chapter ${i + 1}`, index: i, start: outline[i].w, end: outline[i + 1]?.w ?? words.length };
+  }, [outline, wordIndex, words.length]);
 
   function jumpTo(word) {
     setIndex(clamp(Math.floor(word / chunkSize), 0, maxIndex));
     setTouched(true);
+  }
+
+  function setGoal(next) {
+    if (next && !next.done) {
+      goalMsRef.current = 0;
+      next = { ...next, startWord: wordIndex };
+    }
+    goalRef.current = next;
+    setGoalState(next);
+  }
+
+  function searchJump(query, hits, i) {
+    const n = ((i % hits.length) + hits.length) % hits.length;
+    setFound({ query, hits, i: n });
+    setPlaying(false);
+    jumpTo(hits[n]);
+  }
+
+  function goalText(g) {
+    if (!g) return "";
+    if (g.type === "chapter") {
+      const left = Math.max(0, g.targetWord - wordIndex);
+      return `Goal: finish “${g.label}” · ${formatDuration(left / wpm)} left`;
+    }
+    if (g.type === "words") {
+      const done = clamp(wordIndex - g.startWord, 0, g.amount);
+      return `Goal: ${done.toLocaleString()} of ${g.amount.toLocaleString()} words`;
+    }
+    const mins = Math.floor(goalMsRef.current / 60000);
+    return `Goal: ${mins} of ${g.amount} min reading`;
   }
 
   // ---------- Send to a family member ----------
@@ -826,15 +900,45 @@ export default function Reader({ user, config, visible, path }) {
               <button className="btn" onClick={nextSentence} title="Next sentence (Shift+→)" aria-label="Next sentence"><span className="ico" aria-hidden="true">»</span><span className="lbl">Next</span></button>
               <button className="btn" onClick={enterFocus} title="Full-screen reading (F)" aria-label="Focus mode"><span className="ico" aria-hidden="true">⛶</span><span className="lbl">Focus</span></button>
             </div>
-            {(chapterInfo || (docId && members.length > 0)) && (
+            {docId && words.length > 1 && (
               <div className="doc-tools">
-                {chapterInfo && (
-                  <button className="chapter-btn" onClick={() => setSheet("chapters")} title="Chapters">
+                {chapterInfo ? (
+                  <button className="chapter-btn" onClick={() => { setPlaying(false); setSheet("contents"); }} title="Contents">
                     <span className="chapter-name">{chapterInfo.title}</span>
                     <span className="muted"> · {formatDuration(chapterMinutes)} left in chapter</span>
                   </button>
-                )}
-                {docId && members.length > 0 && <button className="btn sm" onClick={() => setSheet("send")}>Send to…</button>}
+                ) : <span className="chapter-btn" />}
+                <span className="row tool-row">
+                  <button className="btn sm" onClick={() => { setPlaying(false); setSheet("find"); }} title="Search, contents and position (/)"><span aria-hidden="true">⌕</span> Find</button>
+                  <button className={`btn sm${goal && !goal.done ? " on" : ""}`} onClick={() => setSheet("goal")} title="Set how much to read this session">Goal</button>
+                  {members.length > 0 && <button className="btn sm" onClick={() => setSheet("send")}>Send to…</button>}
+                </span>
+              </div>
+            )}
+            {found && (
+              <div className="found-bar">
+                <span className="muted small">“{found.query}” · {found.i + 1} of {found.hits.length}</span>
+                <span className="row">
+                  <button className="btn sm" onClick={() => searchJump(found.query, found.hits, found.i - 1)} aria-label="Previous match">‹</button>
+                  <button className="btn sm" onClick={() => searchJump(found.query, found.hits, found.i + 1)} aria-label="Next match">›</button>
+                  <button className="btn sm ghost" onClick={() => setFound(null)} aria-label="Close search">✕</button>
+                </span>
+              </div>
+            )}
+            {goal && !goal.done && (
+              <div className="goal-bar">
+                <span className="small">{goalText(goal)}</span>
+                <button className="btn sm ghost" onClick={() => setGoal(null)} aria-label="Cancel goal">✕</button>
+              </div>
+            )}
+            {goal?.done && (
+              <div className="goal-bar done" role="status">
+                <span><b>Goal reached.</b> {goal.read.toLocaleString()} words in {formatDuration(goal.ms / 60000)}{goal.type === "chapter" ? `, “${goal.label}” finished` : ""}.</span>
+                <span className="row">
+                  {goal.type !== "chapter" && index < maxIndex && <button className="btn sm primary" onClick={() => setGoal({ type: goal.type, amount: goal.amount })}>Same again</button>}
+                  <button className="btn sm" onClick={() => setSheet("goal")}>New goal</button>
+                  <button className="btn sm ghost" onClick={() => setGoal(null)}>Done</button>
+                </span>
               </div>
             )}
             {docId && !playing && quizPending[docId] && (() => {
@@ -941,31 +1045,41 @@ export default function Reader({ user, config, visible, path }) {
         <div className="focus" role="dialog" aria-label="Focus reading">
           <div className="bar"><div style={{ width: `${progress}%` }} /></div>
           <div className="focus-bar">
-            <span>{chapterInfo ? `${chapterInfo.title} · ` : ""}{progress}% · {formatDuration(minutesLeft)} left · {wpm} wpm</span>
+            <span>{goal && !goal.done ? `${goalText(goal)} · ` : goal?.done ? "Goal reached · " : chapterInfo ? `${chapterInfo.title} · ` : ""}{progress}% · {formatDuration(minutesLeft)} left · {wpm} wpm</span>
             <button className="btn sm" onClick={exitFocus} aria-label="Leave focus mode">✕</button>
           </div>
           <Stage {...stageProps} fill />
         </div>
       )}
 
-      {sheet === "chapters" && chapters.length > 0 && (
-        <Sheet title="Chapters" onClose={() => setSheet(null)}>
-          <ol className="chapter-list">
-            {chapters.map((c, i) => {
-              const end = chapters[i + 1]?.w ?? words.length;
-              const done = wordIndex >= end;
-              const isCurrent = chapterInfo?.index === i;
-              return (
-                <li key={`${c.w}-${i}`}>
-                  <button className={`chapter-item${isCurrent ? " current" : ""}`} onClick={() => { jumpTo(c.w); setSheet(null); }}>
-                    <span className="chapter-title">{c.t || `Chapter ${i + 1}`}</span>
-                    <span className="muted small">{done ? "Read" : isCurrent ? `${formatDuration((end - wordIndex) / wpm)} left` : formatDuration((end - c.w) / wpm)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </Sheet>
+      {(sheet === "find" || sheet === "contents") && (
+        <NavigateSheet
+          words={words}
+          outline={outline}
+          outlineGuessed={outlineGuessed}
+          wordIndex={wordIndex}
+          wpm={wpm}
+          initialQuery={found?.query || ""}
+          startTab={sheet === "contents" ? "contents" : found ? "search" : undefined}
+          onJump={(w) => { setFound(null); setPlaying(false); jumpTo(w); }}
+          onSearchJump={searchJump}
+          onClose={() => setSheet(null)}
+        />
+      )}
+
+      {sheet === "goal" && (
+        <GoalSheet
+          chapter={chapterInfo ? { title: chapterInfo.title, end: chapterInfo.end, wordsLeft: chapterInfo.end - wordIndex } : null}
+          nextChapter={chapterInfo && outline[chapterInfo.index + 1] ? (() => {
+            const next = outline[chapterInfo.index + 1];
+            const end = outline[chapterInfo.index + 2]?.w ?? words.length;
+            return { title: next.t || `Chapter ${chapterInfo.index + 2}`, end, wordsLeft: end - wordIndex };
+          })() : null}
+          wordsLeft={words.length - wordIndex}
+          wpm={wpm}
+          onSet={setGoal}
+          onClose={() => setSheet(null)}
+        />
       )}
 
       {sheet === "quiz" && docId && (
