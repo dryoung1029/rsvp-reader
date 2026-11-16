@@ -45,7 +45,7 @@
 		"DROPBOX_APP_KEY": "",
 		// iCloud link to your shared "Send to RAFAS" shortcut (with an import question for the token).
 		// Leave empty to hide the one-tap iPhone setup on the Account page.
-		"SHORTCUT_URL": "https://www.icloud.com/shortcuts/33d76076d9474250b7a90fb66ca8e9e7"
+		"SHORTCUT_URL": "https://www.icloud.com/shortcuts/5d12544bc01b48f5a09ff5c914cadbae"
 	},
 	// Secrets (not stored in this file):
 	//   npx wrangler secret put RESEND_API_KEY   from resend.com, for sign-in emails
